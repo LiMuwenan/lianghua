@@ -1,2 +1,2 @@
-baostock==0.9.40
+baostock==0.9.4
 akshare==1.18.97
