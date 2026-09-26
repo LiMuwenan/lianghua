@@ -1,7 +1,0 @@
-# 策略登记：A2 汇总分析（读取 A.py 产出做汇总）
-name: A2汇总分析
-kind: backtest
-script: strategy/strategy/A2.py
-params: {}
-data_dep: A股日K数据
-output: outputs/结果_汇总.xlsx
