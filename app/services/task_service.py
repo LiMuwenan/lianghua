@@ -13,17 +13,29 @@ import queue
 import subprocess
 import sys
 import threading
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from ..config import Config, load_config
 from ..database import SessionLocal
-from ..models import Strategy, TaskRun
-from . import param_inject
+from ..models import Dataset, StockFreshness, Strategy, TaskRun
+from . import ingest, param_inject
 
 logger = logging.getLogger("app.task_service")
+
+
+def _freshness_from_file(p: Path):
+    """读 parquet 的 date 列得到 (latest_date_str 或 None, row_count)，损坏则 (None,0)。"""
+    try:
+        from . import parquet_store as store
+        df = store.read_stock(p.parent, p.stem)
+        if df.empty:
+            return None, 0
+        return str(df["date"].max()), int(len(df))
+    except Exception:  # noqa: BLE001
+        return None, 0
 
 
 class TaskService:
@@ -58,6 +70,24 @@ class TaskService:
             ref_name=strategy.name,
             status="queued",
             params=params or {},
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        self._q.put(task.id)
+        return task
+
+    def enqueue_ingest(self, db: Session, ds_name: str, ds_id: int,
+                       mode: str = "full", params: dict = None) -> TaskRun:
+        """创建内建摄取任务（kind=ingest），queued 并入队。ref_id 指向 dataset.id。"""
+        params = dict(params or {})
+        params["mode"] = mode
+        task = TaskRun(
+            kind="ingest",
+            ref_id=ds_id,
+            ref_name=ds_name,
+            status="queued",
+            params=params,
         )
         db.add(task)
         db.commit()
@@ -126,18 +156,20 @@ class TaskService:
             self.cfg.logs_dir.mkdir(parents=True, exist_ok=True)
             log_path = self.cfg.logs_dir / f"task_{task_id}.log"
 
-            # 取策略定义
-            strategy = db.query(Strategy).get(task.ref_id)
-            if strategy is None:
-                task.status = "failed"
-                task.finished_at = datetime.now()
-                task.result_summary = {"error": f"引用的脚本登记不存在: ref_id={task.ref_id}"}
-                db.commit()
-                return
-
-            result = self._run_subprocess(
-                strategy, log_path, params=task.params or {}, timeout=self.cfg.task_timeout_sec
-            )
+            if task.kind == "ingest":
+                result = self._run_ingest(task, log_path)
+            else:
+                # 取策略定义
+                strategy = db.query(Strategy).get(task.ref_id)
+                if strategy is None:
+                    task.status = "failed"
+                    task.finished_at = datetime.now()
+                    task.result_summary = {"error": f"引用的脚本登记不存在: ref_id={task.ref_id}"}
+                    db.commit()
+                    return
+                result = self._run_subprocess(
+                    strategy, log_path, params=task.params or {}, timeout=self.cfg.task_timeout_sec
+                )
 
             task.finished_at = datetime.now()
             task.log_path = str(log_path)
@@ -155,6 +187,83 @@ class TaskService:
                 db.commit()
             except Exception:  # noqa
                 db.rollback()
+        finally:
+            db.close()
+
+    def _run_ingest(self, task, log_path: Path) -> dict:
+        """内建摄取：调用 ingest.run_full/run_incremental，协作式取消走任务取消事件。
+
+        数据源钩子（_fetch_daily_bars/_fetch_factors/_trade_dates）已在 main 接线层绑定。
+        """
+        mode = (task.params or {}).get("mode", "full")
+        self._register(task.id)
+        cancel_flag = self.cancel_event(task.id).is_set
+        try:
+            # 计算日期序列：全量从 2020-01-01 至今，增量从最新位点次日至今
+            trade_dates = ingest._trade_dates
+            data_dir = self.cfg.ROOT / "data" / "market" / "daily_price"
+            if mode == "full":
+                dates = trade_dates("2015-01-01", date.today().isoformat())
+            else:
+                latest = self._latest_ingest_date()
+                start = latest.isoformat() if latest else "2015-01-01"
+                dates = trade_dates(start, date.today().isoformat())
+
+            log_path.write_text(f"$ 内建摄取 mode={mode} dates={len(dates)} 天\n", encoding="utf-8")
+            if mode == "full":
+                res = ingest.run_full(data_dir, dates, cancel_flag)
+            else:
+                res = ingest.run_incremental(data_dir, dates, cancel_flag)
+
+            status = res.get("status", "failed")
+            summary = {"mode": mode, "rows": res.get("rows", 0),
+                       "processed_dates": res.get("processed_dates", 0)}
+            if status == "aborted":
+                summary["canceled"] = True
+            elif status == "success":
+                # 更新断点基线：重扫目录内所有 parquet 的位点（真实扫描，不造假）
+                self._refresh_freshness(data_dir)
+            return {
+                "exit_code": 0 if status == "success" else None,
+                "status": status,
+                "summary": summary,
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("内建摄取任务 %s 异常", task.id)
+            return {
+                "exit_code": None,
+                "status": "failed",
+                "summary": {"error": str(exc)},
+            }
+        finally:
+            self._unregister(task.id)
+
+    def _latest_ingest_date(self) -> date | None:
+        db = SessionLocal()
+        try:
+            row = db.query(StockFreshness).order_by(StockFreshness.latest_date.desc()).first()
+            return row.latest_date if row else None
+        finally:
+            db.close()
+
+    def _refresh_freshness(self, data_dir: Path) -> None:
+        """扫描目录内 parquet 的真实位点更新断点基线（不造假值）。"""
+        db = SessionLocal()
+        try:
+            files = sorted(data_dir.glob("*.parquet"))
+            for p in files:
+                code = p.stem
+                latest, rows = _freshness_from_file(p)
+                existing = db.query(StockFreshness).filter(StockFreshness.code == code).first()
+                if latest is None and rows == 0:
+                    continue
+                if existing is None:
+                    existing = StockFreshness(code=code)
+                    db.add(existing)
+                if latest:
+                    existing.latest_date = date.fromisoformat(latest)
+                existing.row_count = rows
+            db.commit()
         finally:
             db.close()
 

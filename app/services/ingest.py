@@ -42,12 +42,27 @@ def _row_to_stock_df(rows: List[dict]) -> pd.DataFrame:
     records = []
     for r in rows:
         r2 = dict(r)
+        # baostock 返回数字为字符串，先对参与复权计算的字段转数值
+        for k in ("open", "high", "low", "close", "qfq_factor", "hfq_factor"):
+            if k in r2 and r2[k] is not None:
+                try:
+                    r2[k] = float(r2[k])
+                except (TypeError, ValueError):
+                    pass
         adjust = compute_adjusted_prices(r2)
         records.append({**r2, **adjust})
     if not records:
         return pd.DataFrame(columns=store.ALL_COLS)
     df = pd.DataFrame(records)
     df["code"] = df["code"].astype(str).str.split(".").str[-1]  # sh/sz.600000 → 600000
+    # baostock 返回数字为字符串，强制转数值，避免“字符串×因子”出错并保证 Parquet 类型统一
+    for col in ["open", "high", "low", "close", "preclose", "volume", "amount",
+                "turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM",
+                "qfq_factor", "hfq_factor",
+                "qfq_open", "qfq_high", "qfq_low", "qfq_close",
+                "hfq_open", "hfq_high", "hfq_low", "hfq_close"]:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
     for col in store.ALL_COLS:
         if col not in df.columns:
             df[col] = None

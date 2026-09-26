@@ -1,95 +1,131 @@
 # -*- coding: utf-8 -*-
-"""数据覆盖度扫描：基于现有真实数据目录的文件扫描，得到覆盖度/滞后天数/最新日期。
+"""数据覆盖度扫描：基于真实 Parquet 文件与元库断点基线（stock_freshness）。
 
-不造假值——所有数字都来自对实际文件/内容的最小读取：
-- 每日：目录下 {date}.csv，latest = 最大文件名日期，lag = 今天 - latest（自然日）。
-- 合并 / A股日K数据：{code}.csv / {code}.xlsx，latest = 任一文件最近修改时间、count = 股票文件数。
-覆盖度 = 实际文件数 / 期望数（期望数来自 config；无法定义时存 0，前端显示实际文件数）。
+不造假值——所有数字都来自对实际文件/内容的真实读取：
+- file_count    = 目录下 *.parquet 文件数（每股一文件，= 已入库股票数）
+- latest_date   = max(stock_freshness.latest_date)，表空则按目录内文件最大 date 兜底
+- lag_days      = max(0, 今天 - latest_date)
+- coverage      = 已入库股票数 / 期望股票数；期望从注入的 BaostockDataSource.universe(today) 得，
+                  取不到（网络/依赖不可用）时 coverage=0 且 status=扫描依赖不可用。
+- 若目录不存在，file_count=0、status=未生成。
 """
 import datetime
 import logging
-import re
 from pathlib import Path
 
 from ..config import Config
-from ..models import Dataset
+from ..models import Dataset, StockFreshness
+from . import parquet_store as store
 
 logger = logging.getLogger("app.dataset_scan")
 
-_DAILY_RE = re.compile(r"(\d{4}-\d{2}-\d{2})")
 
-
-def _latest_mmtime(file: Path) -> str:
-    return datetime.date.fromtimestamp(file.stat().st_mtime).isoformat()
-
-
-def scan_one(cfg: Config, ds_cfg: dict) -> dict:
-    """扫描单个数据集目录，返回扫描结果字段。"""
-    rel_dir = ds_cfg.get("dir", "")
-    data_dir = (cfg.ROOT / rel_dir).resolve()
+def scan_one(cfg: Config, ds_cfg: dict, db_session) -> dict:
+    """扫描单个数据集目录，返回 {file_count, latest_data_date, lag_days, coverage, status}。"""
+    data_dir = (cfg.ROOT / ds_cfg.get("dir", "")).resolve()
     allowed_parent = cfg.ROOT.resolve()
     if allowed_parent not in data_dir.parents and data_dir != allowed_parent:
         # 只接受仓库内目录，避免任意读取
-        return {"missing": True}
+        return {"file_count": 0, "latest_data_date": "", "lag_days": None,
+                "coverage": 0.0, "status": "目录越权"}
 
-    glob = ds_cfg.get("file_glob", "*.csv")
-    if not data_dir.is_dir():
-        files = []
-    else:
-        files = sorted(data_dir.glob(glob))
+    glob = ds_cfg.get("file_glob", "*.parquet")
+    files = sorted(data_dir.glob(glob)) if data_dir.is_dir() else []
+    file_count = len(files)
 
-    count = len(files)
-    if count == 0:
-        return {"file_count": 0, "latest_data_date": "", "lag_days": None, "coverage": 0.0, "status": "未生成"}
+    if file_count == 0:
+        return {"file_count": 0, "latest_data_date": "", "lag_days": None,
+                "coverage": 0.0, "status": "未生成"}
 
-    # 每日：文件名含日期
+    # 最新日期：优先元库断点表，其次扫描目录内文件 date 列取最大
     latest_date = ""
-    lag_days = None
-    if ds_cfg.get("type") == "每日":
-        dates = []
-        for f in files:
-            m = _DAILY_RE.search(f.name)
-            if m:
-                dates.append(datetime.date.fromisoformat(m.group(1)))
-        if dates:
-            latest_date = max(dates).isoformat()
-            lag_days = (datetime.date.today() - max(dates)).days
+    freshest: StockFreshness | None = (
+        db_session.query(StockFreshness)
+        .order_by(StockFreshness.latest_date.desc())
+        .first()
+    )
+    if freshest is not None and freshest.latest_date is not None:
+        latest_date = freshest.latest_date.isoformat()
     else:
-        latest_date = _latest_mmtime(files[-1])
+        maxd = None
+        for f in files[:200]:
+            try:
+                df = store.read_stock(data_dir, f.stem)
+                if not df.empty:
+                    d = datetime.date.fromisoformat(str(df["date"].max()))
+                    maxd = d if maxd is None or d > maxd else maxd
+            except Exception:  # noqa: BLE001  单个文件损坏不影响整体
+                continue
+        if maxd is not None:
+            latest_date = maxd.isoformat()
 
-    expected = int(ds_cfg.get("expected_per_day", 0) or 0)
-    coverage = min(1.0, count / expected) if expected else 0.0
-    status = "正常" if count > 0 else "缺失"
+    lag_days = None
+    if latest_date:
+        try:
+            lag_days = max(0, (datetime.date.today() - datetime.date.fromisoformat(latest_date)).days)
+        except ValueError:  # noqa
+            lag_days = None
+
     return {
-        "file_count": count,
+        "file_count": file_count,
         "latest_data_date": latest_date,
         "lag_days": lag_days,
-        "coverage": round(coverage, 4),
-        "status": status,
+        "coverage": 0.0,          # 期望数由外部注入的 universe 计算，见 scan_all
+        "status": "正常" if file_count > 0 else "缺失",
     }
 
 
-def scan_all(cfg: Config, db_session) -> dict:
-    """扫描 config 中声明的所有数据集并更新 dataset 表。"""
+def scan_all(cfg: Config, db_session, db_session_factory=None) -> dict:
+    """扫描 config 中声明的所有数据集并更新 dataset 表。
+
+    期望股票数在 db_session_factory（可选，用于访问元库）或 db_session 内读取 universe；
+    universe 需在接线层注入（见 app/main.py）——否则取不到时 coverage=0。
+    """
     result = {}
+    expected = _expected_universe()
     for ds_cfg in cfg.datasets:
         name = ds_cfg.get("name", "")
-        data = scan_one(cfg, ds_cfg)
+        data = scan_one(cfg, ds_cfg, db_session)
         row = db_session.query(Dataset).filter(Dataset.name == name).first()
         if row is None:
             row = Dataset(name=name)
             db_session.add(row)
         row.type = ds_cfg.get("type", "")
         row.data_dir = ds_cfg.get("dir", "")
-        if data.get("missing"):
-            row.status = "目录缺失"
-            row.file_count = 0
+        row.file_count = data["file_count"]
+        row.latest_data_date = data["latest_data_date"]
+        row.lag_days = data["lag_days"]
+        row.status = data["status"]
+
+        if expected is None or expected == 0:
+            data["coverage"] = 0.0
+            if data["file_count"] > 0 and expected is None:
+                row.status = "扫描依赖不可用"
         else:
-            row.file_count = data["file_count"]
-            row.latest_data_date = data["latest_data_date"]
-            row.lag_days = data["lag_days"]
-            row.coverage = data["coverage"]
-            row.status = data["status"]
+            data["coverage"] = round(min(1.0, data["file_count"] / expected), 4)
+        row.coverage = data["coverage"]
         result[name] = data
     db_session.commit()
     return result
+
+
+# ---- 期望股票数：由接线层注入的数据源提供，避免 dataset_scan 直接依赖 baostock ----
+_UNIVERSE_PROVIDER = None
+
+
+def set_universe_provider(fn) -> None:
+    """注入期望股票数提供者（返回当日全市场股票代码列表，或 None=不可用）。"""
+    global _UNIVERSE_PROVIDER
+    _UNIVERSE_PROVIDER = fn
+
+
+def _expected_universe():
+    global _UNIVERSE_PROVIDER
+    if _UNIVERSE_PROVIDER is None:
+        return None
+    try:
+        codes = _UNIVERSE_PROVIDER()
+        return len(codes)
+    except Exception:  # noqa: BLE001
+        logger.exception("获取期望股票数失败，coverage 按不可用处理")
+        return None

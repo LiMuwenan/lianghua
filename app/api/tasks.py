@@ -30,6 +30,15 @@ def running_task():
     return {"task_id": svc.running_task_id}
 
 
+@router.post("/{tid}/terminate")
+def terminate_task(tid: int, svc = Depends(get_service)):
+    """请求终止运行中的任务（挂起为 aborted/子进程 kill）。"""
+    ok = svc.terminate(tid)
+    if not ok:
+        raise HTTPException(409, "任务不在运行中，无法终止")
+    return {"ok": True, "task_id": tid}
+
+
 @router.get("/{tid}", response_model=TaskOut)
 def get_task(tid: int, db: Session = Depends(get_db)):
     task = db.query(TaskRun).get(tid)
