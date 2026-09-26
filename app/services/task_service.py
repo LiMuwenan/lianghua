@@ -37,6 +37,10 @@ class TaskService:
         self._worker_stop = threading.Event()
         self._thread = threading.Thread(target=self._loop, daemon=True, name="task-worker")
         self._lock = threading.Lock()
+        # 任务终止支持：task_id -> 子进程 / 取消事件
+        self._procs: dict[int, "subprocess.Popen"] = {}
+        self._cancel_events: dict[int, threading.Event] = {}
+        self._reg_lock = threading.Lock()
 
     def start(self):
         self._thread.start()
@@ -60,6 +64,40 @@ class TaskService:
         db.refresh(task)
         self._q.put(task.id)
         return task
+
+    # ---------- 任务终止支持 ----------
+    def _register(self, task_id: int, proc: "subprocess.Popen" = None) -> None:
+        """登记任务的取消事件与（可选）子进程句柄。"""
+        with self._reg_lock:
+            self._cancel_events[task_id] = threading.Event()
+            if proc is not None:
+                self._procs[task_id] = proc
+
+    def _unregister(self, task_id: int) -> None:
+        with self._reg_lock:
+            self._procs.pop(task_id, None)
+            self._cancel_events.pop(task_id, None)
+
+    def cancel_event(self, task_id: int) -> threading.Event:
+        """返回任务取消事件（不存在则返回新的空事件，避免误导）。"""
+        with self._reg_lock:
+            return self._cancel_events.get(task_id, threading.Event())
+
+    def terminate(self, task_id: int) -> bool:
+        """请求终止运行中任务：置取消事件；若是子进程则立即 kill。返回是否命中运行中任务。"""
+        with self._reg_lock:
+            ev = self._cancel_events.get(task_id)
+            proc = self._procs.get(task_id)
+        if ev is None and proc is None:
+            return False
+        if ev is not None:
+            ev.set()
+        if proc is not None:
+            try:
+                proc.kill()
+            except Exception:  # noqa: BLE001
+                pass
+        return True
 
     # ---------- 内部：工作线程 ----------
     def _loop(self):
@@ -148,11 +186,24 @@ class TaskService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
             )
+            # 登记本次运行的任务号与其子进程，供 terminate() 取消
+            self._register(self.running_task_id, proc)
             stdout = proc.stdout
             lines = []
             with open(log_path, "a", encoding="utf-8", errors="replace") as f:
                 deadline = datetime.now().timestamp() + (timeout if timeout and timeout > 0 else 7200)
                 while True:
+                    # 每次循环先判用户终止（优先级最高，避免被 kill 后的 poll 状态早退）
+                    if self._cancel_events.get(self.running_task_id, threading.Event()).is_set():
+                        if proc.poll() is None:
+                            proc.kill()
+                            proc.wait()
+                        f.write("\n[用户终止]\n")
+                        return {
+                            "exit_code": None,
+                            "status": "aborted",
+                            "summary": {"canceled": True},
+                        }
                     line = stdout.readline()
                     if line:
                         text = line.decode("utf-8", errors="replace")
@@ -196,6 +247,7 @@ class TaskService:
                 "summary": {"lines": len(lines), "exit_code": code},
             }
         finally:
+            self._unregister(self.running_task_id)
             if tmp_path and tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
 
