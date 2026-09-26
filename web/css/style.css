@@ -51,6 +51,7 @@ body {
 }
 .btn:hover { opacity: .9; }
 .btn.ghost { background: #eef1f6; color: var(--text); }
+.btn.danger { background: var(--err); color: #fff; }
 .btn:disabled { opacity: .5; cursor: not-allowed; }
 
 .hidden { display: none !important; }
@@ -71,6 +72,7 @@ body {
 .status-warn { background: var(--warn); }
 .status-err { background: var(--err); }
 .status-muted { background: #aab2bf; }
+.status-aborted { background: #9b59b6; }
 
 /* 策略列表 */
 .strategy-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 18px; }

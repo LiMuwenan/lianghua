@@ -29,6 +29,8 @@ function statusBadge(status) {
       ? "status-ok"
       : status === "queued" || status === "running"
       ? "status-warn"
+      : status === "aborted"
+      ? "status-aborted"
       : status === "failed" || status === "部分失败" || status === "缺失"
       ? "status-err"
       : "status-muted";

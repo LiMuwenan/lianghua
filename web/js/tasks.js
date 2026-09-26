@@ -41,6 +41,12 @@ function renderTasks(list) {
     const viewBtn = el("button", "btn ghost", "日志");
     viewBtn.onclick = () => showLog(t.id, t.ref_name, false);
     opTd.appendChild(viewBtn);
+    if (t.status === "running") {
+      const killBtn = el("button", "btn danger", "终止");
+      killBtn.style.marginLeft = "6px";
+      killBtn.onclick = () => terminateTask(t.id);
+      opTd.appendChild(killBtn);
+    }
     row.appendChild(opTd);
     tbody.appendChild(row);
   });
@@ -64,6 +70,18 @@ function fmtTime(s) {
   return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
 }
 
+async function terminateTask(taskId) {
+  if (!confirm(`确认终止任务 #${taskId}？`)) return;
+  try {
+    await API.post(`/api/tasks/${taskId}/terminate`);
+    alert(`已请求终止任务 #${taskId}`);
+    loadTasks();
+  } catch (e) {
+    alert(e.message || "终止失败");
+    loadTasks();
+  }
+}
+
 function showLog(taskId, name, autoRefresh) {
   currentLogTaskId = taskId;
   $("#logTaskInfo").textContent = `任务 #${taskId} ${name || ""}`;
@@ -84,7 +102,7 @@ async function refreshLog() {
       const pre = $("#logContent");
       pre.scrollTop = pre.scrollHeight;
     }
-    if (["success", "failed", "partial_failed"].includes(r.status) && logTimer) {
+    if (["success", "failed", "partial_failed", "aborted"].includes(r.status) && logTimer) {
       clearInterval(logTimer);
       logTimer = null;
     }
