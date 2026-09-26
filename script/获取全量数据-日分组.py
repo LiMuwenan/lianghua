@@ -141,7 +141,7 @@ def fetch_daily_all():
 # ------------------------- 合并（优化版） -------------------------
 def merge_all():
     """
-    一次性把所有日文件读进内存 → concat → 按 code 分组 → 逐只写 Excel。
+    一次性把所有日文件读进内存 → concat → 按 code 分组 → 逐只写 CSV。
     内存估算（约 2500 万行）：
       10 float32 = 40 B/行，3 int32 = 12 B/行，2 category ≈ 8 B/行
       ≈ 60 B/行 × 2500 万 ≈ 1.5 GB
@@ -190,18 +190,18 @@ def merge_all():
     log(f'排序完成，耗时 {time.time()-t0:.1f}s')
 
     total_codes = int(full['code'].nunique())
-    log(f'共 {total_codes} 只股票，开始逐只写出 Excel ...')
+    log(f'共 {total_codes} 只股票，开始逐只写出 CSV ...')
 
-    # ---------- 阶段 3：逐只写 Excel ----------
+    # ---------- 阶段 3：逐只写 CSV ----------
     t1 = time.time()
     written = 0
     for code, grp in full.groupby('code', sort=False, observed=True):
         written += 1
         try:
-            out_path = os.path.join(MERGED_DIR, f'{code}.xlsx')
-            grp.to_excel(out_path, index=False)
+            out_path = os.path.join(MERGED_DIR, f'{code}.csv')
+            grp.to_csv(out_path, index=False, encoding='utf-8-sig')
         except Exception as e:
-            log(f'  写出 {code}.xlsx 失败: {e}')
+            log(f'  写出 {code}.csv 失败: {e}')
 
         if written % 100 == 0 or written == total_codes:
             elapsed = time.time() - t1
@@ -211,7 +211,6 @@ def merge_all():
 
     log(f'合并流程结束，总耗时 {time.time()-t_all:.1f}s')
     log('================ 合并流程结束 ================')
-
 
 # ------------------------- 主流程 -------------------------
 def main():
