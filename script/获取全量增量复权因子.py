@@ -17,8 +17,10 @@ import baostock as bs
 START_DATE = '2005-01-01'
 END_DATE = datetime.date.today().strftime('%Y-%m-%d')
 
-DAILY_DIR = '复权因子每日'
-MERGED_DIR = '复权因子合并'
+DAILY_DIR = r'F:\量化数据\复权因子每日'
+MERGED_DIR = r'F:\量化数据\复权因子合并'
+MERGED_FILE = '复权因子.csv'      # ★ 合并后的总文件（单文件）
+MERGED_STATE_FILE = '.merged_files.txt'     # ★ 记录已合并过的每日文件名
 LOG_FILE = 'adjust_progress.log'
 
 FETCH_DAILY = True          # ★ 开关：True=抓取每日；False=跳过抓取直接合并
@@ -160,83 +162,111 @@ def fetch_daily_all():
 
 
 # ------------------------- 合并 -------------------------
+def load_merged_set():
+    """读取已合并的每日文件名集合。"""
+    if not os.path.exists(MERGED_STATE_FILE):
+        return set()
+    try:
+        with open(MERGED_STATE_FILE, 'r', encoding='utf-8') as f:
+            return {line.strip() for line in f if line.strip()}
+    except Exception as e:
+        log(f'读取合并记录失败: {e}，按空记录处理')
+        return set()
+
+
+def save_merged_set(merged_set):
+    """保存已合并的每日文件名集合。"""
+    try:
+        with open(MERGED_STATE_FILE, 'w', encoding='utf-8') as f:
+            for name in sorted(merged_set):
+                f.write(name + '\n')
+    except Exception as e:
+        log(f'保存合并记录失败: {e}')
+
+
 def merge_all():
     """
-    读入所有每日文件 → concat → 按 code 分组 → 逐只写 csv；
-    并额外输出一份全市场合并文件。
-    复权因子总量很小（几万行），内存无压力。
+    将所有每日文件合并到单个总文件中：
+      - 已经合并过的每日文件不再重复处理；
+      - 新数据以追加模式写入总文件；
+      - 若总文件不存在或为空，则重置记录，从头合并。
     """
     log('================ 合并流程开始 ================')
+
     daily_files = sorted(Path(DAILY_DIR).glob('*.csv'))
     if not daily_files:
         log(f'"{DAILY_DIR}" 目录下没有 csv 文件，合并结束')
         return
 
-    total_files = len(daily_files)
-    log(f'共发现 {total_files} 个每日数据文件，开始读入 ...')
-    t_all = time.time()
+    merged_path = os.path.join(MERGED_DIR, MERGED_FILE)
+    file_exists = os.path.exists(merged_path) and os.path.getsize(merged_path) > 0
 
-    # ---------- 阶段 1：全部读入 ----------
+    # 读取已合并记录；若总文件被删除/清空，记录同步重置
+    merged_set = load_merged_set()
+    if not file_exists and merged_set:
+        log('总文件不存在或为空，重置已合并记录')
+        merged_set = set()
+
+    # 过滤出尚未合并的每日文件
+    pending = [f for f in daily_files if f.name not in merged_set]
+    if not pending:
+        log('没有需要合并的新文件，合并结束')
+        return
+
+    log(f'每日文件共 {len(daily_files)} 个，其中 {len(pending)} 个待合并')
+
+    # ---------- 阶段 1：读入待合并文件 ----------
+    t_all = time.time()
     all_dfs = []
-    for i, f in enumerate(daily_files, 1):
+    newly_merged = []
+
+    for i, f in enumerate(pending, 1):
         try:
             df = pd.read_csv(f, dtype=DTYPES)
         except Exception as e:
             log(f'  读取 {f.name} 失败: {e}')
             continue
-        if df.empty:
-            continue
-        all_dfs.append(df)
 
-        if i % 500 == 0 or i == total_files:
-            log(f'  读入进度 {i}/{total_files}（最新：{f.stem}），'
+        if df.empty:
+            # 空文件也记入已合并，避免每次都重新检查
+            newly_merged.append(f.name)
+            continue
+
+        all_dfs.append(df)
+        newly_merged.append(f.name)
+
+        if i % 500 == 0 or i == len(pending):
+            log(f'  读入进度 {i}/{len(pending)}（最新：{f.stem}），'
                 f'已用 {time.time()-t_all:.1f}s')
 
-    if not all_dfs:
-        log('所有日文件均为空，合并结束')
-        return
+    # ---------- 阶段 2：追加写入总文件 ----------
+    if all_dfs:
+        t0 = time.time()
+        new_data = pd.concat(all_dfs, ignore_index=True)
+        del all_dfs
 
-    log(f'读入完成，共 {len(all_dfs)} 个非空文件，开始 concat ...')
-    t0 = time.time()
-    full = pd.concat(all_dfs, ignore_index=True)
-    del all_dfs
-    log(f'concat 完成，共 {len(full):,} 行，耗时 {time.time()-t0:.1f}s')
+        if file_exists:
+            # 追加：不再写表头；用 utf-8 避免重复写入 BOM
+            new_data.to_csv(merged_path, mode='a', index=False,
+                            header=False, encoding='utf-8')
+            log(f'追加 {len(new_data):,} 行到 {merged_path}，'
+                f'耗时 {time.time()-t0:.1f}s')
+        else:
+            # 首次写入：带表头 + BOM（方便 Excel 直接打开）
+            new_data.to_csv(merged_path, mode='w', index=False,
+                            header=True, encoding='utf-8-sig')
+            log(f'创建总文件 {merged_path}，写入 {len(new_data):,} 行，'
+                f'耗时 {time.time()-t0:.1f}s')
+    else:
+        log('本次没有非空数据需要写入')
 
-    # ---------- 阶段 2：排序 + 分组 ----------
-    log('按 code / dividOperateDate 排序 ...')
-    t0 = time.time()
-    full = full.sort_values(['code', 'dividOperateDate'],
-                            kind='stable').reset_index(drop=True)
-    log(f'排序完成，耗时 {time.time()-t0:.1f}s')
-
-    total_codes = int(full['code'].nunique())
-    log(f'共 {total_codes} 只股票，开始逐只写出 csv ...')
-
-    # ---------- 阶段 3：逐只写 csv ----------
-    t1 = time.time()
-    written = 0
-    for code, grp in full.groupby('code', sort=False, observed=True):
-        written += 1
-        try:
-            out_path = os.path.join(MERGED_DIR, f'{code}.csv')
-            grp.to_csv(out_path, index=False, encoding='utf-8-sig')
-        except Exception as e:
-            log(f'  写出 {code}.csv 失败: {e}')
-
-        if written % 200 == 0 or written == total_codes:
-            elapsed = time.time() - t1
-            eta = elapsed / written * (total_codes - written)
-            log(f'  写出进度 {written}/{total_codes}（{code}），'
-                f'已用 {elapsed:.0f}s，预计还需 {eta:.0f}s')
-
-    # ---------- 阶段 4：全市场合并文件 ----------
-    total_path = os.path.join(MERGED_DIR, 'all_adjust_factors.csv')
-    full.to_csv(total_path, index=False, encoding='utf-8-sig')
-    log(f'已写出全市场合并文件: {total_path}')
+    # ---------- 阶段 3：更新合并记录 ----------
+    merged_set |= set(newly_merged)
+    save_merged_set(merged_set)
+    log(f'已合并记录更新，累计 {len(merged_set)} 个文件')
 
     log(f'合并流程结束，总耗时 {time.time()-t_all:.1f}s')
     log('================ 合并流程结束 ================')
-
 
 # ------------------------- 主流程 -------------------------
 def main():
