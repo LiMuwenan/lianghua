@@ -47,8 +47,13 @@ def inject_params(source: str, params: dict, schema: dict) -> str:
     inject_map = {}
     for key, meta in schema.items():
         var = meta.get("var")
-        if var and key in params:
-            inject_map[var] = params[key]
+        # 空字符串 / None 表示「沿用脚本自身默认值」，不做注入
+        if not var or key not in params:
+            continue
+        val = params[key]
+        if val is None or (isinstance(val, str) and val.strip() == ""):
+            continue
+        inject_map[var] = val
 
     def repl(match):
         var = match.group("var")
