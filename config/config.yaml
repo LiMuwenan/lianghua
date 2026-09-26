@@ -1,0 +1,39 @@
+# 量化交易平台 平台配置
+# =============================================================
+# 数据库路径（SQLite，相对仓库根目录）
+database: data/meta.db
+
+# 结果输出目录（相对仓库根目录），task 日志写入 {output}/logs/
+output_dir: outputs
+
+# CORS 白名单（仅放行本机来源）
+cors_origins:
+  - http://127.0.0.1:8000
+  - http://localhost:8000
+
+# manifest 扫描目录（相对仓库根目录），*.py.manifest.yaml
+scan_dirs:
+  - script
+  - strategy/strategy
+  - strategy/backtest
+
+# 数据集定义：扫描实际文件得到覆盖度/滞后天数，不作为操控值
+#   dir   : 相对仓库根目录的真实数据目录
+#   type  : 数据类型标识（每日/合并/日K）
+datasets:
+  - name: 每日
+    type: 每日
+    dir: 每日
+    file_glob: "*.csv"
+    expected_per_day: 5000      # 用于「覆盖度」估算参考（非强制精确）
+  - name: 合并
+    type: 合并
+    dir: 合并
+    file_glob: "*.csv"
+  - name: A股日K数据
+    type: 日K
+    dir: A股日K数据
+    file_glob: "*.xlsx"
+
+# 子进程默认超时（秒），单个任务超时后 kill
+task_timeout_sec: 7200

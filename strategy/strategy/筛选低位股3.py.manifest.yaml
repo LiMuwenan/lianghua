@@ -1,0 +1,27 @@
+# 策略登记：A股趋势+触线+反转条件概率统计（多线程/多进程）
+name: 筛选低位股-条件概率统计
+kind: backtest
+script: strategy/strategy/筛选低位股3.py
+params:
+  years:
+    default: 10
+    type: int
+    var: YEARS
+    desc: 只用近 N 年数据
+  buffer:
+    default: 0.01
+    type: float
+    var: BUFFER
+    desc: 1% 缓冲带
+  ma_periods:
+    default: [5, 20, 60, 180]
+    type: "list[int]"
+    var: MA_PERIODS
+    desc: 均线周期
+  max_workers:
+    default: 12
+    type: int
+    var: MAX_WORKERS
+    desc: 线程/进程数
+data_dep: A股日K数据
+output: outputs/筛选低位股_结果.xlsx

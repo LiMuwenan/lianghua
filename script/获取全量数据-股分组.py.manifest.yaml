@@ -1,0 +1,23 @@
+# 数据脚本登记：全量数据抓取（按股分组，产出 A股日K数据 xlsx）
+name: 全量数据抓取-股分组
+kind: script
+script: script/获取全量数据-股分组.py
+params:
+  start_date:
+    default: "2020-01-01"
+    type: date
+    var: START_DATE
+    desc: 起始日期
+  end_date:
+    default: ""
+    type: date
+    var: END_DATE
+    desc: 空=今天
+  max_workers:
+    default: 1
+    type: int
+    var: MAX_WORKERS
+    desc: 并行线程数(建议3~8)
+outputs:
+  - dataset: A股日K数据
+    pattern: A股日K数据/*.xlsx

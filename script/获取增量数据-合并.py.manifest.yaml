@@ -1,0 +1,20 @@
+# 数据脚本登记：每日增量更新 + 合并
+name: 每日增量更新-合并
+kind: script
+script: script/获取增量数据-合并.py
+params:
+  start_date:
+    default: ""
+    type: date
+    var: START_DATE
+    desc: 起始补齐日期(空=按默认)
+  end_date:
+    default: ""
+    type: date
+    var: END_DATE
+    desc: 空=今天
+outputs:
+  - dataset: 每日
+    pattern: 每日/*.csv
+  - dataset: 合并
+    pattern: 合并/*.csv

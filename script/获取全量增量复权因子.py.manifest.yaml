@@ -1,0 +1,23 @@
+# 数据脚本登记：全量/增量复权因子
+name: 全量增量复权因子
+kind: script
+script: script/获取全量增量复权因子.py
+params:
+  start_date:
+    default: "2005-01-01"
+    type: date
+    var: START_DATE
+    desc: 起始日期
+  end_date:
+    default: ""
+    type: date
+    var: END_DATE
+    desc: 空=今天
+  fetch_daily:
+    default: true
+    type: bool
+    var: FETCH_DAILY
+    desc: True=抓取每日 / False=跳过抓取直接合并
+outputs:
+  - dataset: 复权因子
+    pattern: 复权因子.csv

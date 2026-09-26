@@ -4,3 +4,9 @@
 *.xlsx
 *.xls
 *.csv
+
+# 平台运行产物
+outputs/**
+data/**
+__pycache__/
+*.pyc
