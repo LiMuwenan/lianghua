@@ -3,7 +3,7 @@
 from datetime import datetime
 
 from sqlalchemy import (
-    JSON, Boolean, Column, DateTime, Float, Integer, String, Text,
+    JSON, Boolean, Column, Date, DateTime, Float, Integer, String, Text,
 )
 
 from .database import Base
@@ -49,11 +49,13 @@ class TaskRun(Base):
     __tablename__ = "task_run"
 
     id = Column(Integer, primary_key=True)
-    kind = Column(String, default="script")                 # script/strategy/backtest
-    ref_id = Column(Integer, nullable=False)                # 引用的 strategy.id
+    kind = Column(String, default="script")                 # script/strategy/backtest/ingest
+    # ref_id 语义随 kind 变化：script/strategy→strategy.id；ingest→dataset.id；可为空
+    ref_id = Column(Integer, nullable=True)
     ref_name = Column(String, default="")                   # 冗余名称，便于展示
     params = Column(JSON, default=dict)
-    status = Column(String, default="queued")               # queued/running/success/failed/partial_failed
+    # 合法状态集合：queued/running/success/failed/partial_failed/aborted
+    status = Column(String, default="queued")
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)
     exit_code = Column(Integer, nullable=True)
@@ -62,6 +64,15 @@ class TaskRun(Base):
     output_files = Column(JSON, default=list)               # 本次运行产出文件清单
 
     created_at = Column(DateTime, default=datetime.now)
+
+
+class StockFreshness(Base):
+    """每股断点续传基线：记录该股已入库的最新日期与行数。"""
+    __tablename__ = "stock_freshness"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    code = Column(String(16), unique=True, index=True, nullable=False)
+    latest_date = Column(Date, nullable=True)
+    row_count = Column(Integer, default=0)
 
 
 class CronTask(Base):
