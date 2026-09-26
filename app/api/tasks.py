@@ -23,6 +23,13 @@ def list_tasks(limit: int = 100, db: Session = Depends(get_db)):
     return rows
 
 
+@router.get("/running")
+def running_task():
+    """当前正在运行的任务 id（供前端提示）。"""
+    svc = get_service()
+    return {"task_id": svc.running_task_id}
+
+
 @router.get("/{tid}", response_model=TaskOut)
 def get_task(tid: int, db: Session = Depends(get_db)):
     task = db.query(TaskRun).get(tid)
