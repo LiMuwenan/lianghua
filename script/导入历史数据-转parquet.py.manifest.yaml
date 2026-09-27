@@ -1,0 +1,8 @@
+# script/导入历史数据-转parquet.py.manifest.yaml
+name: 历史CSV转Parquet导入
+kind: script
+script: script/导入历史数据-转parquet.py
+params: {}
+outputs:
+  - dataset: 平台日K数据
+    pattern: "{code}.parquet"
