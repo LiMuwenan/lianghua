@@ -129,3 +129,44 @@ def test_run_fetch_cancel(capsys, monkeypatch, tmp_path):
                                cancel_flag=cancel_flag, freshness={})
     assert result["status"] == "aborted"
     assert calls["n"] == 2  # 第二次后即取消
+
+
+def _factor_row(date, code, qfq, hfq):
+    """构造 _fetch_factors 返回行（与 baostock.adjust_factors 口径一致）。"""
+    return {"date": date, "code": code, "qfq_factor": qfq, "hfq_factor": hfq}
+
+
+def test_run_fetch_carries_factor_between_events(tmp_path, monkeypatch):
+    """非除权日沿用最近因子（不再默认 1.0）：d1 除权，d2 沿用。"""
+    monkeypatch.setattr(ingest, "_fetch_daily_bars", fake_daily_bars)
+    monkeypatch.setattr(ingest, "_fetch_factors",
+                        lambda date: [_factor_row(date, "000001", 0.5, 2.0)]
+                        if date == "2024-01-02" else [])
+    res = ingest.run_fetch(tmp_path, dates=["2024-01-02", "2024-01-05"],
+                           cancel_flag=lambda: False, freshness={})
+    assert res["status"] == "success"
+    back = store.read_stock(tmp_path, "000001")
+    assert back["qfq_factor"].tolist() == [0.5, 0.5]   # d1 生效，d5 沿用
+    assert back["qfq_close"].tolist() == [0.5, 0.5]    # 1 × 0.5
+    assert back["hfq_factor"].tolist() == [2.0, 2.0]
+
+
+def test_run_fetch_initial_factors_from_history(tmp_path, monkeypatch):
+    """启动初始因子来自既有 parquet 末行：窗口内无事件也沿用历史因子。"""
+    monkeypatch.setattr(ingest, "_fetch_daily_bars", fake_daily_bars)
+    monkeypatch.setattr(ingest, "_fetch_factors", lambda date: [])
+    # 既有 parquet 末行因子 = 0.5/2.0（模拟转换出的历史）
+    store.write_stock(tmp_path, "000001", _stock_df("000001", "2024-01-02"))
+    path = store.stock_path(tmp_path, "000001")
+    df = store.read_stock(tmp_path, "000001")
+    df.loc[0, ["qfq_factor", "hfq_factor"]] = [0.5, 2.0]
+    df.to_parquet(path, index=False)
+    initial = {"000001": {"qfq_factor": 0.5, "hfq_factor": 2.0}}
+    res = ingest.run_fetch(tmp_path, dates=["2024-01-05"],
+                           cancel_flag=lambda: False,
+                           freshness={"000001": "2024-01-02"},
+                           initial_factors=initial)
+    assert res["status"] == "success"
+    back = store.read_stock(tmp_path, "000001")
+    assert back.iloc[-1]["qfq_factor"] == 0.5
+    assert back.iloc[-1]["qfq_close"] == pytest.approx(0.5)

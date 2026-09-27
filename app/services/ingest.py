@@ -71,13 +71,17 @@ def _row_to_stock_df(rows: List[dict]) -> pd.DataFrame:
 
 def run_fetch(root, dates: List[str],
               cancel_flag: Callable = lambda: False,
-              freshness: dict | None = None) -> dict:
+              freshness: dict | None = None,
+              initial_factors: dict | None = None) -> dict:
     """统一「获取数据」：对 dates 逐日横扫全市场，按股票新建或追加写 Parquet。
 
     - `freshness`: {code: latest_date(str|None)}，每股断点位点（来自元库 stock_freshness）。
       - 某股已有日期（date ≤ latest）→ 该股当日跳过不重写；
       - 若某一日所有已知股票均已包含（date ≤ 所有 latest 的最小值）→ 整日跳过，不请求数据源。
       返回 {"status", "processed_dates", "skipped_dates", "rows"}。
+    - `initial_factors`: {code: {"qfq_factor":..,"hfq_factor":..}}，各股起始因子
+      （增量续传时取该股既有 parquet 末行，衔接历史前向填充；缺省 1.0）。
+    - 因子口径：除权日（当日有 factor 事件）更新该股因子；非除权日沿用最近一次。
     - `cancel_flag()` 返回 True 时在每日边界尽早退出，返回 status=aborted。
     """
     root = Path(root)
@@ -87,6 +91,7 @@ def run_fetch(root, dates: List[str],
     processed = 0
     skipped = 0
     min_done = _global_min(freshness)  # 所有已知股票 latest 的最小值，无则 None
+    last_factor = dict(initial_factors or {})  # {code: {"qfq_factor":..,"hfq_factor":..}}
     for date in dates:
         if cancel_flag():
             return {"status": "aborted", "processed_dates": processed,
@@ -98,7 +103,11 @@ def run_fetch(root, dates: List[str],
         factors = {f["code"]: f for f in _fetch_factors(date)}
         for b in bars:
             code = str(b.get("code", "")).split(".")[-1]
-            fac = factors.get(code) or {"qfq_factor": 1.0, "hfq_factor": 1.0}
+            if code in factors:
+                # 除权日：更新该股最近因子
+                last_factor[code] = {"qfq_factor": factors[code]["qfq_factor"],
+                                     "hfq_factor": factors[code]["hfq_factor"]}
+            fac = last_factor.get(code) or {"qfq_factor": 1.0, "hfq_factor": 1.0}
             b["qfq_factor"], b["hfq_factor"] = fac["qfq_factor"], fac["hfq_factor"]
         df = _row_to_stock_df(bars)
         if df.empty:
