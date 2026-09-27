@@ -38,6 +38,28 @@ def _freshness_from_file(p: Path):
         return None, 0
 
 
+def refresh_freshness(data_dir: Path) -> None:
+    """扫描目录内 parquet 的真实位点更新断点基线（不造假值）。"""
+    db = SessionLocal()
+    try:
+        files = sorted(data_dir.glob("*.parquet"))
+        for p in files:
+            code = p.stem
+            latest, rows = _freshness_from_file(p)
+            existing = db.query(StockFreshness).filter(StockFreshness.code == code).first()
+            if latest is None and rows == 0:
+                continue
+            if existing is None:
+                existing = StockFreshness(code=code)
+                db.add(existing)
+            if latest:
+                existing.latest_date = date.fromisoformat(latest)
+            existing.row_count = rows
+        db.commit()
+    finally:
+        db.close()
+
+
 class TaskService:
     """全局唯一任务调度器。"""
 
@@ -204,6 +226,8 @@ class TaskService:
             data_dir = self.cfg.data_dir
             # 每股断点位点（来自元库 stock_freshness），用于跳过已有日期
             freshness = self._freshness_map()
+            # 各股既有 parquet 末行因子，作为增量起始因子（衔接历史前向填充）
+            initial_factors = self._initial_factors(data_dir, freshness)
             today = date.today().isoformat()
             if start_arg:
                 start = start_arg
@@ -215,7 +239,8 @@ class TaskService:
             log_path.write_text(
                 f"$ 获取数据 start={start} (自动=每股断点/2005) dates={len(dates)} 天\n",
                 encoding="utf-8")
-            res = ingest.run_fetch(data_dir, dates, cancel_flag, freshness)
+            res = ingest.run_fetch(data_dir, dates, cancel_flag, freshness,
+                                   initial_factors)
 
             status = res.get("status", "failed")
             summary = {"start_date": start, "rows": res.get("rows", 0),
@@ -252,26 +277,27 @@ class TaskService:
         finally:
             db.close()
 
-    def _refresh_freshness(self, data_dir: Path) -> None:
-        """扫描目录内 parquet 的真实位点更新断点基线（不造假值）。"""
-        db = SessionLocal()
-        try:
-            files = sorted(data_dir.glob("*.parquet"))
-            for p in files:
-                code = p.stem
-                latest, rows = _freshness_from_file(p)
-                existing = db.query(StockFreshness).filter(StockFreshness.code == code).first()
-                if latest is None and rows == 0:
+    def _initial_factors(self, data_dir: Path, freshness: dict) -> dict:
+        """读各股既有 parquet 末行因子，作为增量起始因子（衔接历史前向填充）。"""
+        from . import parquet_store as store
+        out = {}
+        for code in freshness:
+            p = store.stock_path(data_dir, code)
+            if not p.exists():
+                continue
+            try:
+                df = store.read_stock(data_dir, code)
+                if df.empty:
                     continue
-                if existing is None:
-                    existing = StockFreshness(code=code)
-                    db.add(existing)
-                if latest:
-                    existing.latest_date = date.fromisoformat(latest)
-                existing.row_count = rows
-            db.commit()
-        finally:
-            db.close()
+                row = df.iloc[-1]
+                out[code] = {"qfq_factor": float(row["qfq_factor"]),
+                             "hfq_factor": float(row["hfq_factor"])}
+            except Exception:  # noqa: BLE001
+                continue
+        return out
+
+    def _refresh_freshness(self, data_dir: Path) -> None:
+        refresh_freshness(data_dir)
 
     def _run_subprocess(self, strategy, log_path: Path, params: dict, timeout: int) -> dict:
         """构造并运行临时参数化副本，流式写日志。"""
