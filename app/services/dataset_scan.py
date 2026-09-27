@@ -22,12 +22,18 @@ logger = logging.getLogger("app.dataset_scan")
 
 def scan_one(cfg: Config, ds_cfg: dict, db_session) -> dict:
     """扫描单个数据集目录，返回 {file_count, latest_data_date, lag_days, coverage, status}。"""
-    data_dir = (cfg.ROOT / ds_cfg.get("dir", "")).resolve()
-    allowed_parent = cfg.ROOT.resolve()
-    if allowed_parent not in data_dir.parents and data_dir != allowed_parent:
-        # 只接受仓库内目录，避免任意读取
-        return {"file_count": 0, "latest_data_date": "", "lag_days": None,
-                "coverage": 0.0, "status": "目录越权"}
+    raw = str(ds_cfg.get("dir", "")).strip()
+    data_dir = Path(raw).expanduser()
+    if data_dir.is_absolute():
+        # 用户显式配置的绝对目录（如存放于外部盘），直接信任
+        data_dir = data_dir.resolve()
+    else:
+        # 相对路径按仓库根解析，并做越权校验：不允许逃逸出仓库根
+        data_dir = (cfg.ROOT / data_dir).resolve()
+        allowed_parent = cfg.ROOT.resolve()
+        if allowed_parent not in data_dir.parents and data_dir != allowed_parent:
+            return {"file_count": 0, "latest_data_date": "", "lag_days": None,
+                    "coverage": 0.0, "status": "目录越权"}
 
     glob = ds_cfg.get("file_glob", "*.parquet")
     files = sorted(data_dir.glob(glob)) if data_dir.is_dir() else []
