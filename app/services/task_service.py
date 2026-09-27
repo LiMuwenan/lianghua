@@ -201,7 +201,7 @@ class TaskService:
         cancel_flag = self.cancel_event(task.id).is_set
         try:
             trade_dates = ingest._trade_dates
-            data_dir = self.cfg.ROOT / "data" / "market" / "daily_price"
+            data_dir = self.cfg.data_dir
             # 每股断点位点（来自元库 stock_freshness），用于跳过已有日期
             freshness = self._freshness_map()
             today = date.today().isoformat()

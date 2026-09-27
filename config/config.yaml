@@ -6,6 +6,10 @@ database: data/meta.db
 # 结果输出目录（相对仓库根目录），task 日志写入 {output}/logs/
 output_dir: outputs
 
+# 平台主数据（Parquet 按股票分文件）存储目录，相对仓库根目录
+#   内建「获取数据」摄取写库、覆盖度扫描、数据集声明均对齐该位置
+data_dir: data/market/daily_price
+
 # CORS 白名单（仅放行本机来源）
 cors_origins:
   - http://127.0.0.1:8000

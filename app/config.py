@@ -18,6 +18,7 @@ class Config:
         self.database = ROOT / data.get("database", "data/meta.db")
         self.output_dir = ROOT / data.get("output_dir", "outputs")
         self.logs_dir = self.output_dir / "logs"
+        self.data_dir = ROOT / data.get("data_dir", "data/market/daily_price")
         self.cors_origins = data.get("cors_origins", ["http://127.0.0.1:8000"])
         self.scan_dirs = data.get("scan_dirs", ["script", "strategy/strategy"])
         self.datasets = data.get("datasets", [])
