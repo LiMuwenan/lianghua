@@ -65,3 +65,51 @@ def _fill_factors(dates, events):
         qfq.append(cur_f)
         hfq.append(cur_b)
     return qfq, hfq
+
+
+def convert(daily_dir, factor_dir, out_dir) -> dict:
+    """一次性转换：读日K与因子分片 → 逐股前向填充因子、算复权价 → 写 24 列 parquet。
+
+    返回 {"stocks", "rows", "daily_files"} 统计（供脚本打印/抽样核对）。
+    峰值内存 ~3GB（与既有全量合并脚本同档）：日K分片先 concat 再按 code 分组。
+    """
+    root = Path(out_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    factors = read_factors(factor_dir)
+
+    frames = []
+    daily_files = sorted(Path(daily_dir).glob("*.csv"))
+    daily_dtypes = dict(DAILY_DTYPES)  # 价格列用 float64 保精度，其余列保持 float32 内存优化
+    daily_dtypes.update({c: "float64" for c in _FLOAT_COLS})
+    for p in daily_files:
+        try:
+            df = pd.read_csv(p, encoding="utf-8-sig", dtype=daily_dtypes)
+        except Exception:  # noqa: BLE001
+            continue
+        if df.empty:
+            continue
+        frames.append(df)
+    if not frames:
+        return {"stocks": 0, "rows": 0, "daily_files": len(daily_files)}
+
+    full = pd.concat(frames, ignore_index=True)
+    del frames
+    full["code"] = full["code"].astype(str).str.split(".").str[-1]
+
+    total_rows = 0
+    stocks = 0
+    for code, g in full.groupby("code", sort=False):
+        g = g.sort_values("date").drop_duplicates("date", keep="last")
+        dates = [str(d) for d in g["date"]]
+        qfq, hfq = _fill_factors(dates, factors.get(code, []))
+        out = g[store.DATA_COLS].copy()          # 17 列（不含 adjustflag）
+        out["qfq_factor"] = qfq
+        out["hfq_factor"] = hfq
+        for base in ("open", "high", "low", "close"):
+            price = out[base].astype("float64")
+            out[f"qfq_{base}"] = price * out["qfq_factor"]
+            out[f"hfq_{base}"] = price * out["hfq_factor"]
+        store.write_stock(root, code, out[store.ALL_COLS])
+        total_rows += len(out)
+        stocks += 1
+    return {"stocks": stocks, "rows": total_rows, "daily_files": len(daily_files)}
