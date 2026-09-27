@@ -58,7 +58,7 @@ function renderDatasetCards(list) {
 function row(k, v) {
   const r = el("div", "row");
   r.appendChild(el("span", "k", k));
-  r.appendChild(typeof v === "string" ? el("span", null, v) : v);
+  r.appendChild(v instanceof Node ? v : el("span", null, String(v)));
   return r;
 }
 
