@@ -1,27 +1,7 @@
 // 数据管理页
 async function loadDatasets() {
   const list = await API.get("/api/datasets");
-  renderDatasetChart(list);
   renderDatasetCards(list);
-}
-
-function renderDatasetChart(list) {
-  const dom = $("#datasetChart");
-  const chart = echarts.getInstanceByDom(dom) || echarts.init(dom);
-  chart.setOption({
-    tooltip: {},
-    grid: { left: 40, right: 20, bottom: 30, top: 20 },
-    xAxis: { type: "category", data: list.map((d) => d.name) },
-    yAxis: { type: "value", name: "覆盖度", max: 1 },
-    series: [
-      {
-        type: "bar",
-        data: list.map((d) => d.coverage),
-        itemStyle: { color: "#2f6fed", borderRadius: [4, 4, 0, 0] },
-        label: { show: true, position: "top", formatter: (p) => (p.value * 100).toFixed(0) + "%" },
-      },
-    ],
-  });
 }
 
 function renderDatasetCards(list) {
@@ -41,16 +21,27 @@ function renderDatasetCards(list) {
     card.appendChild(row("覆盖度", d.coverage == null || d.coverage === 0 ? "—" : (d.coverage * 100).toFixed(1) + "%"));
     const badge = statusBadge(d.status);
     card.appendChild(row("状态", el("span", `status-badge ${badge.cls}`, badge.label)));
-    const btnRow = el("div", null);
-    btnRow.style.marginTop = "10px";
-    const fullBtn = el("button", "btn ghost", "获取全量数据");
-    fullBtn.style.marginRight = "8px";
-    fullBtn.onclick = () => runDataset(d, "full");
-    const incBtn = el("button", "btn ghost", "获取增量数据");
-    incBtn.onclick = () => runDataset(d, "incremental");
-    btnRow.appendChild(fullBtn);
-    btnRow.appendChild(incBtn);
-    card.appendChild(btnRow);
+
+    // 起始日期输入（留空=默认：每股断点续传/空库2005-01-01） + 单个「获取数据」按钮
+    const fetchRow = el("div", "fetch-row");
+    fetchRow.style.marginTop = "12px";
+    fetchRow.style.display = "flex";
+    fetchRow.style.alignItems = "center";
+    fetchRow.style.flexWrap = "wrap";
+    fetchRow.style.gap = "8px";
+    const lbl = el("span", "k", "起始日期");
+    const input = el("input", null);
+    input.type = "date";
+    input.id = `startDate-${d.id}`;
+    input.title = "留空=按每股已入库日期续传（空库默认 2005-01-01），已获取的日期自动跳过";
+    const btn = el("button", "btn primary", "获取数据");
+    const tip = el("span", "hint", "留空自动续传，已获取日期自动跳过（默认从 2005-01-01 起）");
+    btn.onclick = () => runDataset(d, input.value);
+    fetchRow.appendChild(lbl);
+    fetchRow.appendChild(input);
+    fetchRow.appendChild(btn);
+    fetchRow.appendChild(tip);
+    card.appendChild(fetchRow);
     box.appendChild(card);
   });
 }
@@ -62,10 +53,11 @@ function row(k, v) {
   return r;
 }
 
-async function runDataset(d, mode) {
+async function runDataset(d, startDate) {
   try {
-    await API.post(`/api/datasets/${d.id}/run?mode=${mode}`);
-    alert(`已触发数据集「${d.name}」${mode === "full" ? "全量" : "增量"}更新，请在「任务」页查看进度`);
+    const q = startDate ? `?start_date=${encodeURIComponent(startDate)}` : "";
+    await API.post(`/api/datasets/${d.id}/run${q}`);
+    alert(`已触发「${d.name}」获取数据${startDate ? `（从 ${startDate} 起）` : ""}，请在「任务」页查看进度`);
   } catch (e) {
     alert("触发失败：" + e.message);
   }

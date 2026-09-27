@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
-"""数据集 API：列表/覆盖状态、触发更新（全量/增量）。"""
+"""数据集 API：列表/覆盖状态、触发获取数据（起始日期可选）。"""
+from datetime import date
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
@@ -22,15 +24,20 @@ def list_datasets(db: Session = Depends(get_db)):
 
 
 @router.post("/{ds_id}/run")
-def run_dataset(ds_id: int, mode: str = Query("full"),
+def run_dataset(ds_id: int, start_date: str = Query(""),
                 db: Session = Depends(get_db)):
-    """触发内建摄取任务：mode=full|incremental，kind=ingest。"""
-    if mode not in ("full", "incremental"):
-        raise HTTPException(422, f"mode 仅支持 full|incremental，收到: {mode}")
+    """触发获取数据（kind=ingest）。start_date 可选；留空=按每股断点续传/空库默认2005-01-01。"""
+    start_date = (start_date or "").strip()
+    if start_date:
+        try:
+            date.fromisoformat(start_date)
+        except ValueError:
+            raise HTTPException(422, f"start_date 格式应为 YYYY-MM-DD，收到: {start_date}")
     ds = db.query(Dataset).get(ds_id)
     if ds is None:
         raise HTTPException(404, "数据集不存在")
 
     svc = get_service()
-    task = svc.enqueue_ingest(db, ds.name, ds.id, mode=mode)
+    task = svc.enqueue_ingest(db, ds.name, ds.id,
+                              params={"start_date": start_date} if start_date else {})
     return {"task_id": task.id, "kind": task.kind}

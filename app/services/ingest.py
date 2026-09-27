@@ -69,31 +69,31 @@ def _row_to_stock_df(rows: List[dict]) -> pd.DataFrame:
     return df[store.ALL_COLS]
 
 
-def _process_day(root, date: str) -> int:
-    """单日处理：拉日K+因子、算复权价、按每股合并写库。返回写入行数。"""
-    bars = _fetch_daily_bars(date)
-    factors = {f["code"]: f for f in _fetch_factors(date)}
-    for b in bars:
-        code = str(b.get("code", "")).split(".")[-1]
-        fac = factors.get(code) or {"qfq_factor": 1.0, "hfq_factor": 1.0}
-        b["qfq_factor"], b["hfq_factor"] = fac["qfq_factor"], fac["hfq_factor"]
-    df = _row_to_stock_df(bars)
-    if df.empty:
-        return 0
-    for code, g in df.groupby("code"):
-        store.merge_stock(root, code, g)
-    return len(df)
+def run_fetch(root, dates: List[str],
+              cancel_flag: Callable = lambda: False,
+              freshness: dict | None = None) -> dict:
+    """统一「获取数据」：对 dates 逐日横扫全市场，按股票新建或追加写 Parquet。
 
-
-def run_full(root: Path, dates: List[str],
-             cancel_flag: Callable = lambda: False) -> dict:
-    """全量：对 dates 逐日横扫，先清空重建每股文件。返回统计。"""
+    - `freshness`: {code: latest_date(str|None)}，每股断点位点（来自元库 stock_freshness）。
+      - 某股已有日期（date ≤ latest）→ 该股当日跳过不重写；
+      - 若某一日所有已知股票均已包含（date ≤ 所有 latest 的最小值）→ 整日跳过，不请求数据源。
+      返回 {"status", "processed_dates", "skipped_dates", "rows"}。
+    - `cancel_flag()` 返回 True 时在每日边界尽早退出，返回 status=aborted。
+    """
     root = Path(root)
+    for k, v in (freshness or {}).items():
+        freshness[k] = _iso(v)  # 原位规范化，调用方可见每股最新位点
     total = 0
     processed = 0
+    skipped = 0
+    min_done = _global_min(freshness)  # 所有已知股票 latest 的最小值，无则 None
     for date in dates:
         if cancel_flag():
-            return {"status": "aborted", "processed_dates": processed, "rows": total}
+            return {"status": "aborted", "processed_dates": processed,
+                    "skipped_dates": skipped, "rows": total}
+        if min_done is not None and date <= min_done:
+            skipped += 1
+            continue
         bars = _fetch_daily_bars(date)
         factors = {f["code"]: f for f in _fetch_factors(date)}
         for b in bars:
@@ -106,23 +106,34 @@ def run_full(root: Path, dates: List[str],
         processed += 1
         total += len(df)
         for code, g in df.groupby("code"):
-            store.write_stock(root, code, g)
-    return {"status": "success", "processed_dates": processed, "rows": total}
+            latest = freshness.get(code)
+            if latest is not None and date <= latest:
+                continue  # 该股已有该日期，不重复写
+            # 无文件则整段新建，有则读旧→concat→去重重写（追加）
+            if store.stock_path(root, code).exists():
+                store.merge_stock(root, code, g)
+            else:
+                store.write_stock(root, code, g)
+            if latest is None or date > latest:
+                freshness[code] = date
+    return {"status": "success", "processed_dates": processed,
+            "skipped_dates": skipped, "rows": total}
 
 
-def run_incremental(root: Path, dates: List[str],
-                    cancel_flag: Callable = lambda: False) -> dict:
-    """增量：对 dates 逐日横扫，每股 merge 重写；cancel_flag() 为 True 时尽早退出。"""
-    root = Path(root)
-    processed = 0
-    total = 0
-    for date in dates:
-        if cancel_flag():
-            return {"status": "aborted", "processed_dates": processed, "rows": total}
-        n = _process_day(root, date)
-        processed += 1
-        total += n
-    return {"status": "success", "processed_dates": processed, "rows": total}
+def _iso(v):
+    """把 date/datetime 或 iso 字符串规范化为 'YYYY-MM-DD'，None 原样返回。"""
+    if v is None:
+        return None
+    s = str(v)
+    if len(s) < 10:
+        return s
+    return s[:10]
+
+
+def _global_min(freshness: dict):
+    """所有已知股票 latest 的最小值；无任何已知则返回 None。"""
+    vals = [v for v in freshness.values() if v]
+    return min(vals) if vals else None
 
 
 def bind_source(ds) -> None:

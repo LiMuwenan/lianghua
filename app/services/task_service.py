@@ -78,10 +78,9 @@ class TaskService:
         return task
 
     def enqueue_ingest(self, db: Session, ds_name: str, ds_id: int,
-                       mode: str = "full", params: dict = None) -> TaskRun:
+                       params: dict = None) -> TaskRun:
         """创建内建摄取任务（kind=ingest），queued 并入队。ref_id 指向 dataset.id。"""
         params = dict(params or {})
-        params["mode"] = mode
         task = TaskRun(
             kind="ingest",
             ref_id=ds_id,
@@ -191,33 +190,37 @@ class TaskService:
             db.close()
 
     def _run_ingest(self, task, log_path: Path) -> dict:
-        """内建摄取：调用 ingest.run_full/run_incremental，协作式取消走任务取消事件。
+        """内建获取数据：调用 ingest.run_fetch，协作式取消走任务取消事件。
 
         数据源钩子（_fetch_daily_bars/_fetch_factors/_trade_dates）已在 main 接线层绑定。
+        起始日期：task.params['start_date'] 可空；留空则按每股断点位点最小值续传（空库默认 2005-01-01）。
         """
-        mode = (task.params or {}).get("mode", "full")
+        params = task.params or {}
+        start_arg = str(params.get("start_date") or "").strip()
         self._register(task.id)
         cancel_flag = self.cancel_event(task.id).is_set
         try:
-            # 计算日期序列：全量从 2020-01-01 至今，增量从最新位点次日至今
             trade_dates = ingest._trade_dates
             data_dir = self.cfg.ROOT / "data" / "market" / "daily_price"
-            if mode == "full":
-                dates = trade_dates("2015-01-01", date.today().isoformat())
+            # 每股断点位点（来自元库 stock_freshness），用于跳过已有日期
+            freshness = self._freshness_map()
+            today = date.today().isoformat()
+            if start_arg:
+                start = start_arg
             else:
-                latest = self._latest_ingest_date()
-                start = latest.isoformat() if latest else "2015-01-01"
-                dates = trade_dates(start, date.today().isoformat())
+                # 空起始：从每股最新日期的全局最小位点续传（已含日期由 run_fetch 单日判断跳过）
+                start = ingest._global_min(freshness) or "2005-01-01"
+            dates = trade_dates(start, today)
 
-            log_path.write_text(f"$ 内建摄取 mode={mode} dates={len(dates)} 天\n", encoding="utf-8")
-            if mode == "full":
-                res = ingest.run_full(data_dir, dates, cancel_flag)
-            else:
-                res = ingest.run_incremental(data_dir, dates, cancel_flag)
+            log_path.write_text(
+                f"$ 获取数据 start={start} (自动=每股断点/2005) dates={len(dates)} 天\n",
+                encoding="utf-8")
+            res = ingest.run_fetch(data_dir, dates, cancel_flag, freshness)
 
             status = res.get("status", "failed")
-            summary = {"mode": mode, "rows": res.get("rows", 0),
-                       "processed_dates": res.get("processed_dates", 0)}
+            summary = {"start_date": start, "rows": res.get("rows", 0),
+                       "processed_dates": res.get("processed_dates", 0),
+                       "skipped_dates": res.get("skipped_dates", 0)}
             if status == "aborted":
                 summary["canceled"] = True
             elif status == "success":
@@ -238,11 +241,14 @@ class TaskService:
         finally:
             self._unregister(task.id)
 
-    def _latest_ingest_date(self) -> date | None:
+    def _freshness_map(self) -> dict:
+        """读元库每股断点位点 → {code: 'YYYY-MM-DD'}，供 run_fetch 跳过已有日期。"""
         db = SessionLocal()
         try:
-            row = db.query(StockFreshness).order_by(StockFreshness.latest_date.desc()).first()
-            return row.latest_date if row else None
+            return {
+                r.code: (r.latest_date.isoformat() if r.latest_date else None)
+                for r in db.query(StockFreshness).all()
+            }
         finally:
             db.close()
 
