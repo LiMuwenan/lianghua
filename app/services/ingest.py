@@ -10,6 +10,7 @@
     默认空实现（便于测试以 fake 替换）；运行时由 API 接线层绑定到真实 BaostockDataSource 实例。
 """
 import logging
+import time
 from pathlib import Path
 from typing import Callable, List
 
@@ -93,16 +94,22 @@ def run_fetch(root, dates: List[str],
     total = 0
     processed = 0
     skipped = 0
+    n_days = len(dates)
+    t_start = time.time()
     min_done = _global_min(freshness)  # 所有已知股票 latest 的最小值，无则 None
     last_factor = dict(initial_factors or {})  # {code: {"qfq_factor":..,"hfq_factor":..}}
-    for date in dates:
+    logger.info("[ingest] 开始获取数据：共 %d 个交易日，min_done=%s", n_days, min_done)
+    for idx, date in enumerate(dates, 1):
         if cancel_flag():
+            logger.info("[ingest] 第 %d/%d 日 %s 前收到取消，提前退出", idx, n_days, date)
             return {"status": "aborted", "processed_dates": processed,
                     "skipped_dates": skipped, "rows": total}
         if min_done is not None and date <= min_done:
             skipped += 1
             continue
+        day_start = time.time()
         bars = _fetch_daily_bars(date)
+        _n_bars = len(bars)
         factors = {f["code"]: f for f in _fetch_factors(date)}
         for b in bars:
             code = str(b.get("code", "")).replace(".", "")   # sh.600000 → sh600000（文件名不含点）
@@ -113,10 +120,13 @@ def run_fetch(root, dates: List[str],
             fac = last_factor.get(code) or {"qfq_factor": 1.0, "hfq_factor": 1.0}
             b["qfq_factor"], b["hfq_factor"] = fac["qfq_factor"], fac["hfq_factor"]
         df = _row_to_stock_df(bars)
+        logger.info("[ingest] 进度 %3d/%d  获取数据源 %s：日K %d 条，因子 %d 条（耗时 %.1fs）",
+                    idx, n_days, date, _n_bars, len(factors), time.time() - day_start)
         if df.empty:
             continue
         processed += 1
         total += len(df)
+        _wrote = 0
         for code, g in df.groupby("code"):
             latest = freshness.get(code)
             if latest is not None and date <= latest:
@@ -128,6 +138,12 @@ def run_fetch(root, dates: List[str],
                 store.write_stock(root, code, g)
             if latest is None or date > latest:
                 freshness[code] = date
+            _wrote += 1
+        logger.info("[ingest]   —— %s 写入 %d 只股票 %d 行（耗时 %.1fs）",
+                    date, _wrote, len(g), time.time() - day_start)
+    total_sec = time.time() - t_start
+    logger.info("[ingest] 结束获取数据：处理 %d/%d 日，跳过 %d 日，共写 %d 行，总耗时 %.1fs",
+                processed, n_days, skipped, total, total_sec)
     return {"status": "success", "processed_dates": processed,
             "skipped_dates": skipped, "rows": total}
 
