@@ -16,8 +16,8 @@ def _write_bom_csv(path, rows, columns):
     df.to_csv(path, index=False, encoding="utf-8-sig")
 
 
-def test_read_factors_strips_prefix_and_skips_empty(tmp_path):
-    """因子目录：解析各日分片，code 去前缀，空文件跳过，事件按日期升序。"""
+def test_read_factors_preserves_prefix_and_skips_empty(tmp_path):
+    """因子目录：解析各日分片，code 保留市场前缀，空文件跳过，事件按日期升序。"""
     d = tmp_path / "factors"
     d.mkdir()
     cols = ["code", "dividOperateDate", "foreAdjustFactor", "backAdjustFactor", "adjustFactor"]
@@ -31,9 +31,9 @@ def test_read_factors_strips_prefix_and_skips_empty(tmp_path):
     _write_bom_csv(d / "2024-06-02.csv", [], cols)  # 空文件（无除权日）
 
     events = csv_import.read_factors(str(d))
-    assert set(events) == {"600000", "000001"}
-    assert events["600000"] == [("2024-01-02", 0.5, 2.0), ("2024-06-01", 1.0, 4.0)]
-    assert events["000001"] == [("2024-01-02", 0.9, 1.5)]
+    assert set(events) == {"sh.600000", "sz.000001"}
+    assert events["sh.600000"] == [("2024-01-02", 0.5, 2.0), ("2024-06-01", 1.0, 4.0)]
+    assert events["sz.000001"] == [("2024-01-02", 0.9, 1.5)]
 
 
 def test_fill_factors_forward_fill(tmp_path):
@@ -79,8 +79,8 @@ def test_convert_end_to_end(tmp_path):
     stats = csv_import.convert(str(daily), str(factors), str(out))
 
     assert stats["stocks"] == 2
-    assert stats["rows"] == 3  # 600000 两行 + 000001 一行
-    df = store.read_stock(out, "600000")
+    assert stats["rows"] == 3  # sh.600000 两行 + sz.000001 一行
+    df = store.read_stock(out, "sh.600000")
     assert len(df) == 2
     assert list(df.columns) == store.ALL_COLS
     # 除权日前(无事件)：因子 1.0，复权价=原始价
@@ -91,6 +91,6 @@ def test_convert_end_to_end(tmp_path):
     assert r2["qfq_factor"] == 0.5 and r2["hfq_factor"] == 2.0
     assert r2["qfq_close"] == pytest.approx(11.2 * 0.5)
     assert r2["hfq_close"] == pytest.approx(11.2 * 2.0)
-    # 000001 无事件：全程 1.0，行数 1
-    df2 = store.read_stock(out, "000001")
+    # sz.000001 无事件：全程 1.0，行数 1
+    df2 = store.read_stock(out, "sz.000001")
     assert len(df2) == 1 and df2.iloc[0]["qfq_factor"] == 1.0

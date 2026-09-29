@@ -74,7 +74,7 @@ class BaostockDataSource(BaseStockDataSource):
             try:
                 out.append({
                     "date": date,
-                    "code": str(r.get("code") or "").split(".")[-1],   # sh/sz.600000 → 600000
+                    "code": str(r.get("code") or ""),               # 保留市场前缀，如 sh.600000
                     "qfq_factor": float(r.get("foreAdjustFactor") or r.get("qfq_factor") or 1.0),
                     "hfq_factor": float(r.get("backAdjustFactor") or r.get("hfq_factor") or 1.0),
                 })
@@ -85,4 +85,4 @@ class BaostockDataSource(BaseStockDataSource):
     def universe(self, date: str) -> List[str]:
         rs = bs.query_all_stock(day=date)
         rows = self._rows(rs, date)
-        return [str(r["code"]).split(".")[-1] for r in rows]   # sh.600000 → 600000
+        return [str(r["code"]) for r in rows]   # 保留市场前缀 sh.600000

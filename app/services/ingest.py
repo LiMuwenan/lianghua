@@ -54,7 +54,7 @@ def _row_to_stock_df(rows: List[dict]) -> pd.DataFrame:
     if not records:
         return pd.DataFrame(columns=store.ALL_COLS)
     df = pd.DataFrame(records)
-    df["code"] = df["code"].astype(str).str.split(".").str[-1]  # sh/sz.600000 → 600000
+    df["code"] = df["code"].astype(str)   # 保留市场前缀，如 sh.600000
     # baostock 返回数字为字符串，强制转数值，避免“字符串×因子”出错并保证 Parquet 类型统一
     for col in ["open", "high", "low", "close", "preclose", "volume", "amount",
                 "turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM",
@@ -102,7 +102,7 @@ def run_fetch(root, dates: List[str],
         bars = _fetch_daily_bars(date)
         factors = {f["code"]: f for f in _fetch_factors(date)}
         for b in bars:
-            code = str(b.get("code", "")).split(".")[-1]
+            code = str(b.get("code", ""))   # 保留市场前缀，如 sh.600000
             if code in factors:
                 # 除权日：更新该股最近因子
                 last_factor[code] = {"qfq_factor": factors[code]["qfq_factor"],

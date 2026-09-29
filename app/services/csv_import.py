@@ -41,7 +41,7 @@ def read_factors(factor_dir) -> dict:
         if df.empty:
             continue
         for _, r in df.iterrows():
-            code = str(r["code"]).split(".")[-1]  # sh.600000 → 600000
+            code = str(r["code"])   # 保留市场前缀，如 sh.600000
             events[code].append((str(r["dividOperateDate"]),
                                  float(r["foreAdjustFactor"]),
                                  float(r["backAdjustFactor"])))
@@ -94,7 +94,7 @@ def convert(daily_dir, factor_dir, out_dir) -> dict:
 
     full = pd.concat(frames, ignore_index=True)
     del frames
-    full["code"] = full["code"].astype(str).str.split(".").str[-1]
+    full["code"] = full["code"].astype(str)   # 保留市场前缀，如 sh.600000
 
     total_rows = 0
     stocks = 0
