@@ -52,6 +52,19 @@ def test_run_fetch_skips_existing_dates(tmp_path, monkeypatch):
     assert back["tradestatus"].dropna().dtype.kind == "i"  # 数值类型，非 object
 
 
+def test_run_fetch_log_callback(tmp_path, monkeypatch):
+    """进度日志经 log 回调输出：会收到开始、进度、写入、结束等行。"""
+    _bind(monkeypatch)
+    lines = []
+    ingest.run_fetch(tmp_path, dates=["2024-01-02", "2024-01-05"],
+                     cancel_flag=lambda: False, freshness={}, log=lines.append)
+    text = "\n".join(lines)
+    assert "开始获取数据" in text
+    assert "2024-01-05" in text and "日K 1 条" in text
+    assert "写入 1 只股票" in text
+    assert "结束获取数据" in text
+
+
 def test_run_fetch_initial_directory(tmp_path, monkeypatch):
     """首次获取（freshness 空）：整段新建每股 parquet，并记下断点位点。"""
     _bind(monkeypatch)

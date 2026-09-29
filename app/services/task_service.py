@@ -258,8 +258,14 @@ class TaskService:
             log_path.write_text(
                 f"$ 获取数据 start={start} (自动=dataset断点/每股断点/2005) dates={len(dates)} 天\n",
                 encoding="utf-8")
+
+            def _append_log(line: str) -> None:
+                # 摄取进度写入任务日志文件，前端任务日志实时可读
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+
             res = ingest.run_fetch(data_dir, dates, cancel_flag, freshness,
-                                   initial_factors)
+                                   initial_factors, log=_append_log)
 
             status = res.get("status", "failed")
             summary = {"start_date": start, "rows": res.get("rows", 0),

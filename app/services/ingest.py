@@ -76,7 +76,8 @@ def _row_to_stock_df(rows: List[dict]) -> pd.DataFrame:
 def run_fetch(root, dates: List[str],
               cancel_flag: Callable = lambda: False,
               freshness: dict | None = None,
-              initial_factors: dict | None = None) -> dict:
+              initial_factors: dict | None = None,
+              log: Callable[[str], None] | None = None) -> dict:
     """统一「获取数据」：对 dates 逐日横扫全市场，按股票新建或追加写 Parquet。
 
     - `freshness`: {code: latest_date(str|None)}，每股断点位点（来自元库 stock_freshness）。
@@ -91,6 +92,13 @@ def run_fetch(root, dates: List[str],
     root = Path(root)
     for k, v in (freshness or {}).items():
         freshness[k] = _iso(v)  # 原位规范化，调用方可见每股最新位点
+
+    def _log(msg: str) -> None:
+        """进度日志：既进任务日志文件（log 回调，由调用方写 task_{id}.log），也留控制台。"""
+        if log:
+            log(msg)
+        logger.info(msg)
+
     total = 0
     processed = 0
     skipped = 0
@@ -98,10 +106,10 @@ def run_fetch(root, dates: List[str],
     t_start = time.time()
     min_done = _global_min(freshness)  # 所有已知股票 latest 的最小值，无则 None
     last_factor = dict(initial_factors or {})  # {code: {"qfq_factor":..,"hfq_factor":..}}
-    logger.info("[ingest] 开始获取数据：共 %d 个交易日，min_done=%s", n_days, min_done)
+    _log(f"开始获取数据：共 {n_days} 个交易日，min_done={min_done}")
     for idx, date in enumerate(dates, 1):
         if cancel_flag():
-            logger.info("[ingest] 第 %d/%d 日 %s 前收到取消，提前退出", idx, n_days, date)
+            _log(f"第 {idx}/{n_days} 日 {date} 前收到取消，提前退出")
             return {"status": "aborted", "processed_dates": processed,
                     "skipped_dates": skipped, "rows": total}
         if min_done is not None and date <= min_done:
@@ -120,8 +128,8 @@ def run_fetch(root, dates: List[str],
             fac = last_factor.get(code) or {"qfq_factor": 1.0, "hfq_factor": 1.0}
             b["qfq_factor"], b["hfq_factor"] = fac["qfq_factor"], fac["hfq_factor"]
         df = _row_to_stock_df(bars)
-        logger.info("[ingest] 进度 %3d/%d  获取数据源 %s：日K %d 条，因子 %d 条（耗时 %.1fs）",
-                    idx, n_days, date, _n_bars, len(factors), time.time() - day_start)
+        _log(f"进度 {idx:3d}/{n_days}  获取数据源 {date}：日K {_n_bars} 条，因子 {len(factors)} 条"
+             f"（耗时 {time.time() - day_start:.1f}s）")
         if df.empty:
             continue
         processed += 1
@@ -139,11 +147,10 @@ def run_fetch(root, dates: List[str],
             if latest is None or date > latest:
                 freshness[code] = date
             _wrote += 1
-        logger.info("[ingest]   —— %s 写入 %d 只股票 %d 行（耗时 %.1fs）",
-                    date, _wrote, len(g), time.time() - day_start)
+        _log(f"  —— {date} 写入 {_wrote} 只股票 {len(g)} 行（耗时 {time.time() - day_start:.1f}s）")
     total_sec = time.time() - t_start
-    logger.info("[ingest] 结束获取数据：处理 %d/%d 日，跳过 %d 日，共写 %d 行，总耗时 %.1fs",
-                processed, n_days, skipped, total, total_sec)
+    _log(f"结束获取数据：处理 {processed}/{n_days} 日，跳过 {skipped} 日，共写 {total} 行，"
+         f"总耗时 {total_sec:.1f}s")
     return {"status": "success", "processed_dates": processed,
             "skipped_dates": skipped, "rows": total}
 
