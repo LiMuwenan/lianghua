@@ -31,3 +31,7 @@ class BaseStockDataSource:
     def universe(self, date: str) -> List[str]:
         """返回截至某日的市场股票代码列表(用于期望覆盖数)。"""
         raise NotImplementedError
+
+    def stock_basics(self) -> List[dict]:
+        """返回当前 A 股基础信息 [{code, name, industry}]，industry 可空。"""
+        raise NotImplementedError

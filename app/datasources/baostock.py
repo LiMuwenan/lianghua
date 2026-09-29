@@ -86,3 +86,26 @@ class BaostockDataSource(BaseStockDataSource):
         rs = bs.query_all_stock(day=date)
         rows = self._rows(rs, date)
         return [str(r["code"]).replace(".", "") for r in rows]   # sh.600000 → sh600000
+
+    def stock_basics(self) -> List[dict]:
+        """拉取 A 股基础信息 [{code, name, industry}]。
+
+        用 query_all_stock 一次取得当日证券列表（含名称），再按沪深 A 股代码规则过滤
+        掉指数等非个股；industry baostock 提供不了，置空（预留字段）。
+        """
+        from ..services.stock_service import is_a_stock, suggest_trade_day
+
+        day = suggest_trade_day(self)
+        rs = bs.query_all_stock(day=day)
+        rows = self._rows(rs, day)
+        out = []
+        for r in rows:
+            code = str(r.get("code") or "")
+            if not is_a_stock(code):
+                continue
+            out.append({
+                "code": code.replace(".", ""),               # sh.600000 → sh600000（文件名不含点）
+                "name": str(r.get("code_name") or "").strip(),
+                "industry": "",
+            })
+        return out

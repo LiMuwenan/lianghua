@@ -65,6 +65,16 @@ class TaskRun(Base):
     created_at = Column(DateTime, default=datetime.now)
 
 
+class Stock(Base):
+    """A股基础信息映射：支撑个股选择器显示名称（由初始化任务从 baostock 拉取）。"""
+    __tablename__ = "stock"
+
+    id = Column(Integer, primary_key=True)
+    code = Column(String(16), unique=True, index=True, nullable=False)   # 归一化 code，如 sh600000
+    name = Column(String, default="")
+    industry = Column(String, default="")                                # baostock 无行业字段，预留空
+
+
 class StockFreshness(Base):
     """每股断点续传基线：记录该股已入库的最新日期与行数。"""
     __tablename__ = "stock_freshness"

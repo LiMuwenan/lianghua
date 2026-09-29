@@ -61,7 +61,57 @@ class TaskOut(BaseModel):
         from_attributes = True
 
 
-# ---------- 定时任务（P0 预留） ----------
+# ---------- 个股（P1） ----------
+class StockOut(BaseModel):
+    code: str
+    name: str = ""
+    industry: str = ""
+
+    class Config:
+        from_attributes = True
+
+
+class KlineSeries(BaseModel):
+    """一组 K 线价量序列（raw/qfq/hfq 各一份）。"""
+    dates: list = []
+    open: list = []
+    high: list = []
+    low: list = []
+    close: list = []
+    volume: list = []
+
+
+class KlineOut(BaseModel):
+    """单股区间日K，一次返回不复权/前复权/后复权三组价量。"""
+    code: str = ""
+    raw: KlineSeries = KlineSeries()
+    qfq: KlineSeries = KlineSeries()
+    hfq: KlineSeries = KlineSeries()
+
+
+class StockInitOut(BaseModel):
+    ok: bool
+    count: int = 0
+    message: str = ""
+
+
+# ---------- 定时任务（P1 完整 CRUD） ----------
+class CronCreate(BaseModel):
+    name: str
+    kind: str = "ingest"              # ingest | strategy
+    ref_id: int
+    cron_expr: str = ""               # 标准 cron 5 字段：minute hour dom month dow
+    params: dict = {}
+    enabled: bool = True
+
+
+class CronUpdate(BaseModel):
+    name: str | None = None
+    cron_expr: str | None = None
+    enabled: bool | None = None
+    params: dict | None = None
+
+
 class CronOut(BaseModel):
     id: int
     name: str
