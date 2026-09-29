@@ -73,8 +73,7 @@ def on_startup():
     # 建表 + 初始化目录
     init_db()
     cfg.logs_dir.mkdir(parents=True, exist_ok=True)
-    # 连接数据源并把真实实例绑定为摄取钩子
-    _ds.connect()
+    # 不在此发起 baostock 登录（会话会过期）；改为首次查询时由 _query() 惰性登录
     app.state.ds = _ds                       # 供个股初始化等服务使用
     ingest.bind_source(_ds)
     # 启动任务执行线程
