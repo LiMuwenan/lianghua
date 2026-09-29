@@ -1,0 +1,21 @@
+# 构建上下文裁剪：避免把大数据/产物/密钥带入镜像上下文
+.git
+.gitignore
+.idea
+node_modules
+web/dist
+web/node_modules
+data
+outputs
+*.log
+__pycache__
+*.pyc
+*.csv
+*.xlsx
+*.xls
+*.zip
+*.md
+.github
+docs
+tests
+docker-compose.yml
