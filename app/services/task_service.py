@@ -26,6 +26,15 @@ from . import ingest, param_inject
 logger = logging.getLogger("app.task_service")
 
 
+def _resolve_start(start_arg: str, ds_latest: str, freshness: dict) -> str:
+    """解析无/有显式日期时的摄取起点：显式参数 > dataset 最新位点 > 每股断点全局最小 > 2005-01-01。"""
+    if start_arg and start_arg.strip():
+        return start_arg.strip()
+    if ds_latest and ds_latest.strip():
+        return ds_latest.strip()
+    return ingest._global_min(freshness) or "2005-01-01"
+
+
 def _freshness_from_file(p: Path):
     """读 parquet 的 date 列得到 (latest_date_str 或 None, row_count)，损坏则 (None,0)。"""
     try:
@@ -215,7 +224,8 @@ class TaskService:
         """内建获取数据：调用 ingest.run_fetch，协作式取消走任务取消事件。
 
         数据源钩子（_fetch_daily_bars/_fetch_factors/_trade_dates）已在 main 接线层绑定。
-        起始日期：task.params['start_date'] 可空；留空则按每股断点位点最小值续传（空库默认 2005-01-01）。
+        起始日期：task.params['start_date'] 可空；留空则用该 dataset 的 latest_data_date（最新整体位点）
+        续抓新交易日；dataset 起点为空时兜底按每股断点位点最小续传（空库默认 2005-01-01）。
         """
         params = task.params or {}
         start_arg = str(params.get("start_date") or "").strip()
@@ -229,15 +239,24 @@ class TaskService:
             # 各股既有 parquet 末行因子，作为增量起始因子（衔接历史前向填充）
             initial_factors = self._initial_factors(data_dir, freshness)
             today = date.today().isoformat()
+            # 起始日期：优先用任务的 start_date；未指定则用该 dataset 的 latest_data_date
+            # （最新整体位点，续抓新交易日；避免被长期停更/退市股拉回很久以前）。
+            ds_latest = ""
+            _db = SessionLocal()
+            try:
+                _ds_row = _db.query(Dataset).get(task.ref_id)
+                if _ds_row is not None:
+                    ds_latest = (getattr(_ds_row, "latest_data_date", "") or "").strip()
+            finally:
+                _db.close()
             if start_arg:
                 start = start_arg
             else:
-                # 空起始：从每股最新日期的全局最小位点续传（已含日期由 run_fetch 单日判断跳过）
-                start = ingest._global_min(freshness) or "2005-01-01"
+                start = _resolve_start(start_arg, ds_latest, freshness)
             dates = trade_dates(start, today)
 
             log_path.write_text(
-                f"$ 获取数据 start={start} (自动=每股断点/2005) dates={len(dates)} 天\n",
+                f"$ 获取数据 start={start} (自动=dataset断点/每股断点/2005) dates={len(dates)} 天\n",
                 encoding="utf-8")
             res = ingest.run_fetch(data_dir, dates, cancel_flag, freshness,
                                    initial_factors)
