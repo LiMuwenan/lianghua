@@ -37,6 +37,21 @@ def _stock_df(code, date):
     return ingest._row_to_stock_df([row])
 
 
+def test_run_fetch_skips_existing_dates(tmp_path, monkeypatch):
+    """整型标记列(baostock 为字符串) 转数值后，(新建+merge) 两次落盘不报 ArrowInvalid，
+    读回 tradestatus 为数值类型，避免 str 与既有 int 混成 object。"""
+    _bind(monkeypatch)
+    freshness = {}
+    ingest.run_fetch(tmp_path, dates=["2024-01-02"], cancel_flag=lambda: False,
+                     freshness=freshness)
+    res = ingest.run_fetch(tmp_path, dates=["2024-01-05"], cancel_flag=lambda: False,
+                           freshness=freshness)  # 第二天走 merge_stock，类型一致性
+    assert res["status"] == "success"
+    back = store.read_stock(tmp_path, "000001")
+    assert set(back["date"]) == {"2024-01-02", "2024-01-05"}
+    assert back["tradestatus"].dropna().dtype.kind == "i"  # 数值类型，非 object
+
+
 def test_run_fetch_initial_directory(tmp_path, monkeypatch):
     """首次获取（freshness 空）：整段新建每股 parquet，并记下断点位点。"""
     _bind(monkeypatch)

@@ -60,7 +60,10 @@ def _row_to_stock_df(rows: List[dict]) -> pd.DataFrame:
                 "turn", "pctChg", "peTTM", "pbMRQ", "psTTM", "pcfNcfTTM",
                 "qfq_factor", "hfq_factor",
                 "qfq_open", "qfq_high", "qfq_low", "qfq_close",
-                "hfq_open", "hfq_high", "hfq_low", "hfq_close"]:
+                "hfq_open", "hfq_high", "hfq_low", "hfq_close",
+                # 整型标记列同样来自 baostock 字符串，需转数值以与既有 parquet 类型一致，
+                # 否则 merge 时 str 与 int 混成 object，写 parquet 会 ArrowInvalid
+                "adjustflag", "tradestatus", "isST"]:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
     for col in store.ALL_COLS:
