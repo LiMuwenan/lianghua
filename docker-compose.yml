@@ -1,0 +1,14 @@
+services:
+  lianghua:
+    image: "${DOCKERHUB_USERNAME}/lianghua:${TAG:-latest}"
+    container_name: lianghua
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - APP_CONFIG=/app/config/config.docker.yaml
+    volumes:
+      # 数据基目录（含 /data/market、/data/meta.db、/data/outputs）
+      - "${DATA_DIR:-./data}:/data"
+      # 可选：用宿主机配置覆盖镜像默认；不设则用镜像内置 config.docker.yaml
+      - "${CONFIG_FILE:-./config/config.docker.yaml}:/app/config/config.docker.yaml:ro"
+    restart: unless-stopped
