@@ -1,0 +1,29 @@
+# 量化交易平台 容器运行配置（打入镜像，docker-compose 挂载宿主机配置可覆盖）
+# 数据基目录 /data 由容器卷挂载提供：/data/market、/data/meta.db、/data/outputs
+database: /data/meta.db
+
+output_dir: /data/outputs
+
+# 主数据（Parquet 按股票分文件）容器内目录
+data_dir: /data/market
+
+# CORS 白名单（本机来源 + 常见 host 访问）
+cors_origins:
+  - http://127.0.0.1:8000
+  - http://localhost:8000
+  - http://127.0.0.1:5173
+  - http://localhost:5173
+
+# manifest 扫描目录（相对仓库根 /app，打入镜像）
+scan_dirs:
+  - script
+  - strategy/strategy
+  - strategy/backtest
+
+datasets:
+  - name: 平台日K数据
+    type: 日K
+    dir: /data/market
+    file_glob: "*.parquet"
+
+task_timeout_sec: 7200
