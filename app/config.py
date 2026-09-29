@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-"""平台配置加载：读取 config/config.yaml，提供全局路径与参数。"""
+"""平台配置加载：读取配置文件，提供全局路径与参数。"""
+import os
 import sys
 from pathlib import Path
 
@@ -35,8 +36,16 @@ class Config:
         return (ROOT / rel).resolve()
 
 
+def _config_path() -> Path:
+    """返回配置文件路径：env APP_CONFIG 优先，否则仓库默认 config.yaml。"""
+    env = os.environ.get("APP_CONFIG")
+    if env:
+        return Path(env).expanduser()
+    return ROOT / "config" / "config.yaml"
+
+
 def load_config() -> Config:
-    cfg_path = ROOT / "config" / "config.yaml"
+    cfg_path = _config_path()
     with open(cfg_path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return Config(data)
