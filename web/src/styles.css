@@ -1,0 +1,105 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f5f6fa;
+  --card: #fff;
+  --border: #e4e7ed;
+  --text: #303133;
+  --muted: #909399;
+  --primary: #2563eb;
+  --primary-dark: #1d4ed8;
+  --ok: #16a34a;
+  --warn: #d97706;
+  --err: #dc2626;
+  --aborted: #6b7280;
+}
+
+body {
+  font-family: "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+}
+
+/* 顶栏 */
+.topbar {
+  display: flex; align-items: center; gap: 24px;
+  background: #fff; border-bottom: 1px solid var(--border);
+  padding: 0 24px; height: 56px;
+}
+.brand { font-size: 18px; font-weight: 600; }
+.brand .ver { font-size: 12px; color: var(--muted); font-weight: 400; margin-left: 6px; }
+.nav { display: flex; gap: 6px; flex: 1; }
+.nav a {
+  color: var(--muted); text-decoration: none; padding: 6px 14px;
+  border-radius: 6px; transition: all .15s;
+}
+.nav a:hover { background: #f0f2f5; color: var(--text); }
+.nav a.router-link-active { background: var(--primary); color: #fff; }
+.running-hint { color: var(--warn); font-size: 13px; }
+
+/* 主容器 */
+.container { max-width: 1280px; margin: 0 auto; padding: 24px; }
+
+/* 卡片/表 */
+.card {
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 18px 22px; margin-bottom: 18px;
+}
+.page-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.page-head h2 { font-size: 17px; }
+
+.table { width: 100%; border-collapse: collapse; background: #fff; }
+.table th, .table td { border: 1px solid var(--border); padding: 8px 10px; text-align: left; }
+.table th { background: #fafbfc; font-weight: 600; }
+
+/* 状态徽标 */
+.status-badge { padding: 2px 9px; border-radius: 20px; font-size: 12px; color: #fff; display: inline-block; }
+.status-ok { background: var(--ok); }
+.status-warn { background: var(--warn); }
+.status-err { background: var(--err); }
+.status-aborted { background: var(--aborted); }
+.status-muted { background: var(--muted); }
+
+/* 按钮/输入 */
+.btn {
+  border: 1px solid var(--border); background: #fff; color: var(--text);
+  padding: 6px 14px; border-radius: 6px; cursor: pointer; font-size: 13px;
+}
+.btn:hover { background: #f0f2f5; }
+.btn.primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+.btn.primary:hover { background: var(--primary-dark); }
+.btn.danger { background: var(--err); color: #fff; border-color: var(--err); }
+.btn.ghost { border-color: var(--border); background: transparent; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn + .btn { margin-left: 8px; }
+
+input[type="text"], input[type="date"], input[type="number"], select {
+  border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 13px;
+  font-family: inherit;
+}
+.field { margin-bottom: 10px; display: flex; flex-direction: column; gap: 4px; }
+.field label { font-size: 12px; color: var(--muted); }
+
+.empty { color: var(--muted); padding: 24px; text-align: center; }
+.hint { color: var(--muted); font-size: 12px; }
+.muted { color: var(--muted); }
+
+.row { display: flex; align-items: center; gap: 8px; }
+.k { color: var(--muted); min-width: 90px; display: inline-block; }
+
+/* 日志弹窗 */
+.modal-mask {
+  position: fixed; inset: 0; background: rgba(0,0,0,.4); display: flex;
+  align-items: center; justify-content: center; z-index: 100;
+}
+.modal-box { background: #fff; border-radius: 10px; width: min(900px, 92vw); height: 70vh; display: flex; flex-direction: column; }
+.modal-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.modal-head h3 { font-size: 15px; }
+.modal-head .info { color: var(--muted); font-size: 13px; flex: 1; }
+.log-content { flex: 1; overflow: auto; padding: 12px 16px; background: #1e1e1e; color: #d4d4d4; font-size: 12px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; }
+.modal-foot { display: flex; align-items: center; gap: 12px; padding: 10px 16px; border-top: 1px solid var(--border); }
+
+.grid { display: grid; gap: 18px; }
+.grid-3 { grid-template-columns: repeat(3, 1fr); }
+@media (max-width: 1100px) { .grid-3 { grid-template-columns: 1fr; } }

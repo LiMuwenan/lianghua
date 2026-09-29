@@ -10,10 +10,12 @@ output_dir: outputs
 #   内建「获取数据」摄取写库、文件扫描、数据集声明均对齐该位置
 data_dir: E:/资料/证券/lianghua/market
 
-# CORS 白名单（仅放行本机来源）
+# CORS 白名单（仅放行本机来源；含 Vite dev 端口 5173）
 cors_origins:
   - http://127.0.0.1:8000
   - http://localhost:8000
+  - http://127.0.0.1:5173
+  - http://localhost:5173
 
 # manifest 扫描目录（相对仓库根目录），*.py.manifest.yaml
 scan_dirs:
