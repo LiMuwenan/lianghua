@@ -25,7 +25,7 @@
 
     <div v-if="noData" class="empty">该股票在所选区间无数据（可能未摄取或不在股票列表）</div>
     <div v-else-if="loading" class="empty">加载中…</div>
-    <div v-else-if="klines.raw.dates && klines.raw.dates.length" class="grid grid-3">
+    <div v-else-if="klines.raw && klines.raw.dates && klines.raw.dates.length" class="grid grid-stack">
       <KlineChart title="不复权" :data="klines.raw" />
       <KlineChart title="前复权" :data="klines.qfq" />
       <KlineChart title="后复权" :data="klines.hfq" />
@@ -43,7 +43,8 @@ const keyword = ref('')
 const selectedCode = ref('')
 const from = ref('')
 const to = ref('')
-const klines = ref({})
+const emptyKlines = { raw: {}, qfq: {}, hfq: {} }
+const klines = ref({ ...emptyKlines })
 const loading = ref(false)
 const noData = ref(false)
 

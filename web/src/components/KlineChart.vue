@@ -1,8 +1,8 @@
 <template>
   <div class="card">
     <h3 style="margin-bottom: 8px">{{ title }}</h3>
+    <div ref="el" class="chart"></div>
     <div v-if="empty" class="empty">该股票在所选区间无数据</div>
-    <div v-else ref="el" class="chart"></div>
   </div>
 </template>
 
@@ -21,12 +21,24 @@ let ro = null
 
 const empty = ref(true)
 
+// 容器恒挂载，故挂载即可初始化；杜绝空态下 el 不存在导致的初始化时序问题
+function ensureChart() {
+  if (chart || !el.value) return
+  chart = echarts.init(el.value)
+  ro = new ResizeObserver(() => chart && chart.resize())
+  ro.observe(el.value)
+}
+
 function render() {
   const d = props.data || {}
   const dates = d.dates || []
   empty.value = !dates.length
+  ensureChart()
   if (!chart) return
-  if (!dates.length) return
+  if (!dates.length) {
+    chart.clear()   // 空态：清空画布，仅保留提示文本
+    return
+  }
 
   // K线数据：[open, close, low, high]（ECharts candlestick 排序），配合涨跌色
   const kData = dates.map((_, i) => [d.open[i], d.close[i], d.low[i], d.high[i]])
@@ -74,10 +86,7 @@ function render() {
 watch(() => props.data, render, { deep: true })
 
 onMounted(() => {
-  if (!el.value) return
-  chart = echarts.init(el.value)
-  ro = new ResizeObserver(() => chart && chart.resize())
-  ro.observe(el.value)
+  ensureChart()
   render()
 })
 onBeforeUnmount(() => {
