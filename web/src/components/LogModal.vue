@@ -1,11 +1,11 @@
 <template>
-  <div v-if="visible" class="modal-mask" @click.self="$emit('close')">
+  <div v-if="visible" class="modal-mask" @click.self="$emit('update:visible', false)">
     <div class="modal-box">
       <div class="modal-head">
         <h3>任务日志</h3>
         <span class="info">{{ info }}</span>
         <span class="muted" v-if="status">{{ statusText }}</span>
-        <button class="btn ghost" @click="$emit('close')">✕</button>
+        <button class="btn ghost" @click="$emit('update:visible', false)">✕</button>
       </div>
       <pre ref="pre" class="log-content">{{ content || '(暂无日志，任务可能尚未产出日志文件)' }}</pre>
       <div class="modal-foot">
@@ -28,7 +28,7 @@ const props = defineProps({
   taskId: { type: [Number, String], default: null },
   info: { type: String, default: '' },
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['update:visible'])
 
 const content = ref('')
 let status = ref('')
