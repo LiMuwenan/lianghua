@@ -21,7 +21,6 @@ class Dataset(Base):
     last_run_at = Column(DateTime, nullable=True)
     latest_data_date = Column(String, default="")           # 最新数据日期
     lag_days = Column(Integer, default=0)                   # 滞后天数
-    coverage = Column(Float, default=0)                     # 覆盖度 0~1
     status = Column(String, default="")                     # 正常/缺失/未生成
     file_count = Column(Integer, default=0)                 # 实际文件数
 

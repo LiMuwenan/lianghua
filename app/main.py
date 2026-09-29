@@ -3,11 +3,9 @@
 
 启动：uvicorn app.main:app --host 127.0.0.1 --port 8000
 """
-import datetime
 import logging
 import logging.handlers
 import sys
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -33,15 +31,6 @@ cfg: Config = load_config()
 _ds = BaostockDataSource()
 
 
-def _universe_codes():
-    """返回当日全市场股票代码列表（期望覆盖度基数）。取不到时返回空列表。"""
-    try:
-        return _ds.universe(datetime.date.today().isoformat())
-    except Exception:  # noqa: BLE001
-        logger.warning("获取期望股票数失败（数据源不可用）")
-        return []
-
-
 app = FastAPI(title="量化交易平台", version="0.1.0")
 
 app.add_middleware(
@@ -63,10 +52,9 @@ def on_startup():
     # 建表 + 初始化目录
     init_db()
     cfg.logs_dir.mkdir(parents=True, exist_ok=True)
-    # 连接数据源并把真实实例绑定为摄取钩子 + 期望覆盖数提供者
+    # 连接数据源并把真实实例绑定为摄取钩子
     _ds.connect()
     ingest.bind_source(_ds)
-    dataset_scan.set_universe_provider(_universe_codes)
     # 启动任务执行线程
     service = init_task_service(cfg)
     service.start()

@@ -18,7 +18,6 @@ function renderDatasetCards(list) {
     card.appendChild(row("股票数(文件数)", d.file_count));
     card.appendChild(row("最新数据日期", d.latest_data_date || "—"));
     card.appendChild(row("滞后天数", d.lag_days == null ? "—" : `${d.lag_days} 天`));
-    card.appendChild(row("覆盖度", d.coverage == null || d.coverage === 0 ? "—" : (d.coverage * 100).toFixed(1) + "%"));
     const badge = statusBadge(d.status);
     card.appendChild(row("状态", el("span", `status-badge ${badge.cls}`, badge.label)));
 

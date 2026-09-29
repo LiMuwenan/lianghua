@@ -37,7 +37,6 @@ class DatasetOut(BaseModel):
     last_run_at: Optional[datetime] = None
     latest_data_date: str = ""
     lag_days: Optional[int] = None
-    coverage: float = 0.0
     status: str = ""
     file_count: int = 0
 

@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/datasets", tags=["datasets"])
 
 @router.get("", response_model=list[DatasetOut])
 def list_datasets(db: Session = Depends(get_db)):
-    """数据集列表，并同步一次文件扫描（覆盖度/最新日期/滞后天数）。"""
+    """数据集列表，并同步一次文件扫描（最新日期/滞后天数）。"""
     cfg = load_config()
     dataset_scan.scan_all(cfg, db)
     return db.query(Dataset).all()

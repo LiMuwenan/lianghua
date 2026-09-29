@@ -7,8 +7,8 @@ database: data/meta.db
 output_dir: outputs
 
 # 平台主数据（Parquet 按股票分文件）存储目录，相对仓库根目录
-#   内建「获取数据」摄取写库、覆盖度扫描、数据集声明均对齐该位置
-data_dir: data/market/daily_price
+#   内建「获取数据」摄取写库、文件扫描、数据集声明均对齐该位置
+data_dir: E:/资料/证券/lianghua/market
 
 # CORS 白名单（仅放行本机来源）
 cors_origins:
@@ -21,13 +21,13 @@ scan_dirs:
   - strategy/strategy
   - strategy/backtest
 
-# 数据集定义：扫描实际文件得到覆盖度/滞后天数，不作为操控值
+# 数据集定义：扫描实际文件得到最新日期/滞后天数，不作为操控值
 #   dir   : 相对仓库根目录的真实数据目录
 #   type  : 数据类型标识
 datasets:
   - name: 平台日K数据
     type: 日K
-    dir: data/market/daily_price
+    dir: E:/资料/证券/lianghua/market
     file_glob: "*.parquet"
 
 # 子进程默认超时（秒），单个任务超时后 kill
