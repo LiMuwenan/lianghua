@@ -15,13 +15,13 @@
       <div class="muted" style="margin-bottom: 6px">{{ s.script_path }}</div>
       <div class="muted" v-if="s.data_dep" style="margin-bottom: 10px">依赖数据：{{ s.data_dep }}</div>
 
-      <div class="fields" v-if="paramKeys.length">
-        <div class="field" v-for="k in paramKeys" :key="k">
-          <label>{{ (schema[k] && schema[k].desc) || k }}（{{ k }}）</label>
+      <div class="fields" v-if="schemaKeys(s).length">
+        <div class="field" v-for="k in schemaKeys(s)" :key="k">
+          <label>{{ (s.params_schema[k] && s.params_schema[k].desc) || k }}（{{ k }}）</label>
           <input
             v-model="paramVals[s.id][k]"
-            :type="inputType(schema[k] && schema[k].type)"
-            :placeholder="String((schema[k] && schema[k].default) ?? '')"
+            :type="inputType(s.params_schema[k] && s.params_schema[k].type)"
+            :placeholder="String((s.params_schema[k] && s.params_schema[k].default) ?? '')"
             style="width: 280px; max-width: 100%"
           />
         </div>
@@ -68,6 +68,9 @@ async function rescan() {
 function inputType(t) {
   if (t === 'int' || t === 'float') return 'number'
   return 'text'
+}
+function schemaKeys(s) {
+  return Object.keys(s.params_schema || {})
 }
 function parseParam(raw, type) {
   if (raw == null || raw === '') return ''
