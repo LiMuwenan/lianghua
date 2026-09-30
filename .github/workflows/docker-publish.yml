@@ -8,8 +8,8 @@ on:
 
 env:
   # 优先 vars.DOCKERHUB_IMAGE（完整镜像名）；否则用 vars/secrets 中的用户名拼 lianghua
-  IMAGE_NAME: ${{ vars.DOCKERHUB_IMAGE || format('{0}/lianghua', vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME) }}
-  DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
+  IMAGE_NAME: ${{ vars.DOCKERHUB_IMAGE }}
+  DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
 
 jobs:
   build-push:
