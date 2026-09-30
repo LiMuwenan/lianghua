@@ -7,7 +7,8 @@ COPY web/ ./
 RUN npm run build
 
 # 阶段二：后端运行环境（单镜像，静态托管 web/dist）
-FROM python:3.10-slim AS runtime
+# 注：akshare==1.18.97 要求 Python>=3.11，故用 3.11-slim（满足项目 Python 3.10+ 约束）
+FROM python:3.11-slim AS runtime
 ENV PYTHONUNBUFFERED=1 \
     PYTHONIOENCODING=utf-8 \
     APP_CONFIG=/app/config/config.docker.yaml \
