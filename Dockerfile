@@ -14,15 +14,16 @@ ENV PYTHONUNBUFFERED=1 \
     TZ=Asia/Shanghai
 WORKDIR /app
 
-# 系统依赖（tzdata）
+# 系统依赖（tzdata + 编译工具链，供个别包源码构建 wheel）
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata \
+    && apt-get install -y --no-install-recommends tzdata gcc g++ make \
     && rm -rf /var/lib/apt/lists/* \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
-# Python 依赖
+# Python 依赖：先升级 pip/setuptools/wheel，确保 pyarrow 等大包能命中预编译 wheel（旧 pip 会退回源码编译而失败）
 COPY requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -U pip setuptools wheel \
+    && pip install --no-cache-dir -r requirements.txt
 
 # 平台代码 + manifest 扫描目录 + 容器配置
 COPY app/ ./app/
