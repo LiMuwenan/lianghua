@@ -1,0 +1,13 @@
+name: 组合调仓回测
+kind: backtest
+script: strategy/backtest/组合调仓回测.py
+data_dep: 平台日K数据
+params:
+  pool_file:    {default: "",            type: str,   desc: "选股池CSV(空=最近一次)", var: POOL_FILE}
+  hold_n:       {default: 20,            type: int,   desc: "每期持有数",             var: HOLD_N}
+  cost:         {default: 0.002,         type: float, desc: "双边交易成本",           var: COST}
+  weight_mode:  {default: "equal",       type: str,   desc: "权重模式(equal)",        var: WEIGHT_MODE}
+  benchmark:    {default: "market_equal",type: str,   desc: "基准(market_equal/指数code)", var: BENCHMARK}
+  init_capital: {default: 1000000.0,     type: float, desc: "初始资金",               var: INIT_CAPITAL}
+  data_dir:     {default: "",            type: str,   desc: "数据目录(空=读config)",  var: DATA_DIR}
+output: outputs/backtest/bt_*/metrics.json

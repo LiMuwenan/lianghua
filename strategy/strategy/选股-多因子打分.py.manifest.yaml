@@ -1,0 +1,17 @@
+name: 多因子选股
+kind: strategy
+script: strategy/strategy/选股-多因子打分.py
+data_dep: 平台日K数据
+params:
+  start_date:    {default: "2020-01-01", type: date,  desc: "起始日期",              var: START_DATE}
+  end_date:      {default: "",           type: date,  desc: "结束日期(空=今天)",     var: END_DATE}
+  rebalance:     {default: "M",          type: str,   desc: "调仓周期(M/W)",         var: REBALANCE}
+  top_n:         {default: 20,           type: int,   desc: "每期选股数",            var: TOP_N}
+  w_value:       {default: 1.0,          type: float, desc: "估值因子权重",          var: W_VALUE}
+  w_momentum:    {default: 1.0,          type: float, desc: "动量因子权重",          var: W_MOMENTUM}
+  w_vol:         {default: 1.0,          type: float, desc: "波动率因子权重",        var: W_VOL}
+  w_liquidity:   {default: 1.0,          type: float, desc: "流动性因子权重",        var: W_LIQUIDITY}
+  min_amount:    {default: 50000000.0,   type: float, desc: "20日均成交额下限(元)",  var: MIN_AMOUNT}
+  min_list_days: {default: 120,          type: int,   desc: "上市最少交易日",        var: MIN_LIST_DAYS}
+  data_dir:      {default: "",           type: str,   desc: "数据目录(空=读config)", var: DATA_DIR}
+output: outputs/selection/select_*.csv
