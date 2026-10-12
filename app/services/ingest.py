@@ -17,6 +17,7 @@ from typing import Callable, List
 import pandas as pd
 
 from . import parquet_store as store
+from . import raw_store
 
 logger = logging.getLogger("app.services.ingest")
 
@@ -77,17 +78,17 @@ def run_fetch(root, dates: List[str],
               cancel_flag: Callable = lambda: False,
               freshness: dict | None = None,
               initial_factors: dict | None = None,
-              log: Callable[[str], None] | None = None) -> dict:
+              log: Callable[[str], None] | None = None,
+              daily_dir=None, factor_dir=None) -> dict:
     """统一「获取数据」：对 dates 逐日横扫全市场，按股票新建或追加写 Parquet。
 
-    - `freshness`: {code: latest_date(str|None)}，每股断点位点（来自元库 stock_freshness）。
-      - 某股已有日期（date ≤ latest）→ 该股当日跳过不重写；
-      - 若某一日所有已知股票均已包含（date ≤ 所有 latest 的最小值）→ 整日跳过，不请求数据源。
-      返回 {"status", "processed_dates", "skipped_dates", "rows"}。
-    - `initial_factors`: {code: {"qfq_factor":..,"hfq_factor":..}}，各股起始因子
-      （增量续传时取该股既有 parquet 末行，衔接历史前向填充；缺省 1.0）。
-    - 因子口径：除权日（当日有 factor 事件）更新该股因子；非除权日沿用最近一次。
-    - `cancel_flag()` 返回 True 时在每日边界尽早退出，返回 status=aborted。
+    除终态 Parquet 外，`daily_dir`/`factor_dir` 提供时另落两层原始 CSV
+    （审计/可重建）：{dir}/{date}.csv，UTF-8 BOM、带表头、已存在跳过、
+    无数据写仅表头空文件；写失败仅记日志，不阻断主链路。
+    `freshness` 某股已有日期（date ≤ latest）→ 该股当日跳过不重写；
+    整日跳过条件 = 断点已覆盖该日 **且** 原始层两文件都已存在（原始层关闭时退化为原行为）。
+    `initial_factors` 为各股起始因子（增量续传时取既有 parquet 末行）。
+    `cancel_flag()` 返回 True 时在每日边界尽早退出，返回 status=aborted。
     """
     root = Path(root)
     for k, v in (freshness or {}).items():
@@ -112,13 +113,17 @@ def run_fetch(root, dates: List[str],
             _log(f"第 {idx}/{n_days} 日 {date} 前收到取消，提前退出")
             return {"status": "aborted", "processed_dates": processed,
                     "skipped_dates": skipped, "rows": total}
-        if min_done is not None and date <= min_done:
+        # 整日跳过：断点已覆盖该日，且（若启用原始层）两层原始文件都已存在
+        raw_ready = ((not daily_dir or raw_store.has_daily(daily_dir, date))
+                     and (not factor_dir or raw_store.has_factor(factor_dir, date)))
+        if min_done is not None and date <= min_done and raw_ready:
             skipped += 1
             continue
         day_start = time.time()
         bars = _fetch_daily_bars(date)
         _n_bars = len(bars)
-        factors = {f["code"]: f for f in _fetch_factors(date)}
+        factor_rows = _fetch_factors(date)
+        factors = {f["code"]: f for f in factor_rows}
         for b in bars:
             code = str(b.get("code", "")).replace(".", "")   # sh.600000 → sh600000（文件名不含点）
             if code in factors:
@@ -128,6 +133,17 @@ def run_fetch(root, dates: List[str],
             fac = last_factor.get(code) or {"qfq_factor": 1.0, "hfq_factor": 1.0}
             b["qfq_factor"], b["hfq_factor"] = fac["qfq_factor"], fac["hfq_factor"]
         df = _row_to_stock_df(bars)
+        # 原始层留存（审计/可重建）：写失败不阻断主链路
+        if daily_dir:
+            try:
+                raw_store.write_daily(daily_dir, date, bars)
+            except Exception as exc:  # noqa: BLE001
+                _log(f"  {date} 原始层日K写盘失败（不阻断）：{exc}")
+        if factor_dir:
+            try:
+                raw_store.write_factor(factor_dir, date, factor_rows)
+            except Exception as exc:  # noqa: BLE001
+                _log(f"  {date} 原始层因子写盘失败（不阻断）：{exc}")
         _log(f"进度 {idx:3d}/{n_days}  获取数据源 {date}：日K {_n_bars} 条，因子 {len(factors)} 条"
              f"（耗时 {time.time() - day_start:.1f}s）")
         if df.empty:

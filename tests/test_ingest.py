@@ -2,8 +2,9 @@
 import sys
 sys.path.insert(0, "d:/Project/lianghua")
 
+import pandas as pd
 import pytest
-from app.services import ingest, parquet_store as store
+from app.services import ingest, parquet_store as store, raw_store
 
 
 def fake_daily_bars(date):
@@ -198,3 +199,53 @@ def test_run_fetch_initial_factors_from_history(tmp_path, monkeypatch):
     back = store.read_stock(tmp_path, "000001")
     assert back.iloc[-1]["qfq_factor"] == 0.5
     assert back.iloc[-1]["qfq_close"] == pytest.approx(0.5)
+
+
+def test_run_fetch_writes_raw_layer(tmp_path, monkeypatch):
+    """启用原始层：同一天同时产出每日 CSV 与终态 parquet。"""
+    monkeypatch.setattr(ingest, "_fetch_daily_bars", fake_daily_bars)
+    monkeypatch.setattr(ingest, "_fetch_factors",
+                        lambda date: [_factor_row(date, "000001", 0.5, 2.0)])
+    daily_dir = tmp_path / "daily"
+    factor_dir = tmp_path / "factor"
+    market = tmp_path / "market"
+    res = ingest.run_fetch(market, dates=["2024-01-02"], cancel_flag=lambda: False,
+                           freshness={}, daily_dir=daily_dir, factor_dir=factor_dir)
+    assert res["status"] == "success"
+    assert (daily_dir / "2024-01-02.csv").exists()
+    assert (factor_dir / "2024-01-02.csv").exists()
+    assert store.stock_path(market, "000001").exists()
+    df = pd.read_csv(daily_dir / "2024-01-02.csv", encoding="utf-8-sig")
+    assert list(df.columns) == raw_store.DAILY_RAW_COLS
+
+
+def test_run_fetch_raw_layer_backfills_missing(tmp_path, monkeypatch):
+    """原始层缺文件的日期不被整日跳过（补抓补写）；两文件齐备后才跳过。"""
+    monkeypatch.setattr(ingest, "_fetch_daily_bars", fake_daily_bars)
+    monkeypatch.setattr(ingest, "_fetch_factors", lambda date: [])
+    daily_dir = tmp_path / "daily"
+    factor_dir = tmp_path / "factor"
+    market = tmp_path / "market"
+    ingest.run_fetch(market, dates=["2024-01-02"], cancel_flag=lambda: False,
+                     freshness={}, daily_dir=daily_dir, factor_dir=factor_dir)
+    (daily_dir / "2024-01-02.csv").unlink()          # 模拟原始层缺文件
+    res = ingest.run_fetch(market, dates=["2024-01-02"], cancel_flag=lambda: False,
+                           freshness={"000001": "2024-01-02"},
+                           daily_dir=daily_dir, factor_dir=factor_dir)
+    assert res["skipped_dates"] == 0 and res["processed_dates"] == 1
+    assert (daily_dir / "2024-01-02.csv").exists()
+    res2 = ingest.run_fetch(market, dates=["2024-01-02"], cancel_flag=lambda: False,
+                            freshness={"000001": "2024-01-02"},
+                            daily_dir=daily_dir, factor_dir=factor_dir)
+    assert res2["skipped_dates"] == 1 and res2["processed_dates"] == 0
+
+
+def test_run_fetch_without_raw_dirs_keeps_behavior(tmp_path, monkeypatch):
+    """不传原始层目录：行为与现状一致（无原始层文件、断点整日跳过）。"""
+    monkeypatch.setattr(ingest, "_fetch_daily_bars", fake_daily_bars)
+    monkeypatch.setattr(ingest, "_fetch_factors", lambda date: [])
+    market = tmp_path / "market"
+    ingest.run_fetch(market, dates=["2024-01-02"], cancel_flag=lambda: False, freshness={})
+    res = ingest.run_fetch(market, dates=["2024-01-02"], cancel_flag=lambda: False,
+                           freshness={"000001": "2024-01-02"})
+    assert res["skipped_dates"] == 1
