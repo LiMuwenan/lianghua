@@ -234,6 +234,8 @@ class TaskService:
         try:
             trade_dates = ingest._trade_dates
             data_dir = self.cfg.data_dir
+            daily_dir = self.cfg.daily_dir
+            factor_dir = self.cfg.factor_dir
             # 每股断点位点（来自元库 stock_freshness），用于跳过已有日期
             freshness = self._freshness_map()
             # 各股既有 parquet 末行因子，作为增量起始因子（衔接历史前向填充）
@@ -256,7 +258,8 @@ class TaskService:
             dates = trade_dates(start, today)
 
             log_path.write_text(
-                f"$ 获取数据 start={start} (自动=dataset断点/每股断点/2005) dates={len(dates)} 天\n",
+                f"$ 获取数据 start={start} (自动=dataset断点/每股断点/2005) dates={len(dates)} 天\n"
+                f"$ 原始层 daily_dir={daily_dir} factor_dir={factor_dir}\n",
                 encoding="utf-8")
 
             def _append_log(line: str) -> None:
@@ -265,7 +268,8 @@ class TaskService:
                     f.write(line + "\n")
 
             res = ingest.run_fetch(data_dir, dates, cancel_flag, freshness,
-                                   initial_factors, log=_append_log)
+                                   initial_factors, log=_append_log,
+                                   daily_dir=daily_dir, factor_dir=factor_dir)
 
             status = res.get("status", "failed")
             summary = {"start_date": start, "rows": res.get("rows", 0),
