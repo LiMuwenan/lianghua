@@ -53,3 +53,40 @@ def test_write_daily_creates_dir(tmp_path):
     root = tmp_path / "nested" / "daily"
     raw_store.write_daily(root, "2024-01-02", _bars("2024-01-02"))
     assert root.is_dir()
+
+
+def test_write_factor_raw_fields(tmp_path):
+    """5 列原样字段：raw_code 带点、dividOperateDate 与 adjustFactor 保留。"""
+    rows = [{
+        "date": "2024-01-02", "code": "sh600000", "raw_code": "sh.600000",
+        "dividOperateDate": "2024-01-02", "foreAdjustFactor": 0.9,
+        "backAdjustFactor": 3.3, "adjustFactor": 1.1,
+        "qfq_factor": 0.9, "hfq_factor": 3.3,
+    }]
+    p = raw_store.write_factor(tmp_path, "2024-01-02", rows)
+    assert p.name == "2024-01-02.csv"
+    df = pd.read_csv(p, encoding="utf-8-sig", dtype=str)
+    assert list(df.columns) == raw_store.FACTOR_RAW_COLS
+    assert df.loc[0, "code"] == "sh.600000"
+    assert df.loc[0, "dividOperateDate"] == "2024-01-02"
+    assert float(df.loc[0, "foreAdjustFactor"]) == 0.9
+    assert float(df.loc[0, "backAdjustFactor"]) == 3.3
+    assert float(df.loc[0, "adjustFactor"]) == 1.1
+
+
+def test_write_factor_fallback_fields(tmp_path):
+    """仅含归一化字段（如单测假数据）时回退填充，仍可落盘。"""
+    rows = [{"date": "2024-01-02", "code": "000001",
+             "qfq_factor": 0.5, "hfq_factor": 2.0}]
+    p = raw_store.write_factor(tmp_path, "2024-01-02", rows)
+    df = pd.read_csv(p, encoding="utf-8-sig", dtype=str)
+    assert df.loc[0, "code"] == "000001"
+    assert df.loc[0, "dividOperateDate"] == "2024-01-02"
+    assert float(df.loc[0, "foreAdjustFactor"]) == 0.5
+    assert float(df.loc[0, "backAdjustFactor"]) == 2.0
+
+
+def test_write_factor_empty_day_marker(tmp_path):
+    """无除权事件：写仅表头文件，存在性为 True。"""
+    raw_store.write_factor(tmp_path, "2024-01-03", [])
+    assert raw_store.has_factor(tmp_path, "2024-01-03") is True
