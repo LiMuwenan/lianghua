@@ -25,7 +25,12 @@ class BaseStockDataSource:
         raise NotImplementedError
 
     def adjust_factors(self, date: str) -> List[dict]:
-        """返回某日全市场复权因子 dict 列表(含 code/qfq_factor/hfq_factor)。"""
+        """返回某日全市场复权因子 dict 列表。
+
+        每行含归一化字段 code/qfq_factor/hfq_factor（供摄取落 Parquet），
+        以及原始字段 raw_code/dividOperateDate/foreAdjustFactor/backAdjustFactor/
+        adjustFactor（供原始层落 CSV）。
+        """
         raise NotImplementedError
 
     def universe(self, date: str) -> List[str]:

@@ -95,10 +95,17 @@ class BaostockDataSource(BaseStockDataSource):
         for r in rows:
             try:
                 out.append({
+                    # 归一化字段（摄取落 parquet 用，契约不变）
                     "date": date,
-                    "code": str(r.get("code") or "").replace(".", ""),   # sh.600000 → sh600000（文件名不含点）
+                    "code": str(r.get("code") or "").replace(".", ""),   # sh.600000 → sh600000
                     "qfq_factor": float(r.get("foreAdjustFactor") or r.get("qfq_factor") or 1.0),
                     "hfq_factor": float(r.get("backAdjustFactor") or r.get("hfq_factor") or 1.0),
+                    # 原始字段（原始层落 CSV 用：保留点前缀与原列名，不新增查询）
+                    "raw_code": str(r.get("code") or ""),
+                    "dividOperateDate": r.get("dividOperateDate"),
+                    "foreAdjustFactor": r.get("foreAdjustFactor"),
+                    "backAdjustFactor": r.get("backAdjustFactor"),
+                    "adjustFactor": r.get("adjustFactor"),
                 })
             except (TypeError, ValueError):
                 continue
