@@ -8,7 +8,12 @@ output_dir: outputs
 
 # 平台主数据（Parquet 按股票分文件）存储目录，相对仓库根目录
 #   内建「获取数据」摄取写库、文件扫描、数据集声明均对齐该位置
-data_dir: E:/资料/证券/lianghua/market
+data_dir: F:\market
+
+# 原始层目录（审计/可重建）：每日股票数据（日K日分组）与因子数据（复权因子每日）
+#   与遗留脚本同格式的按日 CSV；仅作附加留存，不参与数据集扫描与断点统计
+daily_dir: "G:\\各种资料\\量化数据\\A股日K日分组"
+factor_dir: "G:\\各种资料\\量化数据\\复权因子每日"
 
 # CORS 白名单（仅放行本机来源；含 Vite dev 端口 5173）
 cors_origins:
@@ -29,7 +34,7 @@ scan_dirs:
 datasets:
   - name: 平台日K数据
     type: 日K
-    dir: E:/资料/证券/lianghua/market
+    dir: F:\market
     file_glob: "*.parquet"
 
 # 子进程默认超时（秒），单个任务超时后 kill

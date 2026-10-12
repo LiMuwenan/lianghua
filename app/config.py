@@ -20,6 +20,8 @@ class Config:
         self.output_dir = ROOT / data.get("output_dir", "outputs")
         self.logs_dir = self.output_dir / "logs"
         self.data_dir = Config._p(ROOT, data.get("data_dir", "data/market/daily_price"))
+        self.daily_dir = Config._p(ROOT, data.get("daily_dir", r"G:\各种资料\量化数据\A股日K日分组"))
+        self.factor_dir = Config._p(ROOT, data.get("factor_dir", r"G:\各种资料\量化数据\复权因子每日"))
         self.cors_origins = data.get("cors_origins", ["http://127.0.0.1:8000"])
         self.scan_dirs = data.get("scan_dirs", ["script", "strategy/strategy"])
         self.datasets = data.get("datasets", [])

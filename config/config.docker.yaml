@@ -7,6 +7,10 @@ output_dir: /data/outputs
 # 主数据（Parquet 按股票分文件）容器内目录
 data_dir: /data/market
 
+# 原始层目录（容器内）
+daily_dir: /data/raw/daily
+factor_dir: /data/raw/factor
+
 # CORS 白名单（本机来源 + 常见 host 访问）
 cors_origins:
   - http://127.0.0.1:8000
