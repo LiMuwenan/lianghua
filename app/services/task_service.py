@@ -176,15 +176,17 @@ class TaskService:
             task = db.query(TaskRun).get(task_id)
             if task is None:
                 return
-            task.status = "running"
-            task.started_at = datetime.now()
-            db.commit()
-            with self._lock:
-                self.running_task_id = task_id
-
             # 准备日志文件
             self.cfg.logs_dir.mkdir(parents=True, exist_ok=True)
             log_path = self.cfg.logs_dir / f"task_{task_id}.log"
+
+            task.status = "running"
+            task.started_at = datetime.now()
+            # 开跑前先落库日志路径，保证运行期间 /log 接口能实时读到追加中的日志
+            task.log_path = str(log_path)
+            db.commit()
+            with self._lock:
+                self.running_task_id = task_id
 
             if task.kind == "ingest":
                 result = self._run_ingest(task, log_path)
@@ -202,7 +204,6 @@ class TaskService:
                 )
 
             task.finished_at = datetime.now()
-            task.log_path = str(log_path)
             task.exit_code = result["exit_code"]
             task.result_summary = result["summary"]
             task.status = result["status"]
