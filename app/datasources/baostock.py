@@ -128,25 +128,41 @@ class BaostockDataSource(BaseStockDataSource):
         rows = self._rows(rs, date)
         return [str(r["code"]).replace(".", "") for r in rows]   # sh.600000 → sh600000
 
+    def stock_industry(self) -> dict:
+        """行业映射 {归一化code: 行业}。baostock query_stock_industry 一次返回全市场。"""
+        rs = self._query(lambda: bs.query_stock_industry())
+        out = {}
+        for r in self._rows(rs, "stock_industry"):
+            code = str(r.get("code") or "").replace(".", "")
+            ind = str(r.get("industry") or "").strip()
+            if code and ind:
+                out[code] = ind
+        return out
+
     def stock_basics(self) -> List[dict]:
         """拉取 A 股基础信息 [{code, name, industry}]。
 
-        用 query_all_stock 一次取得当日证券列表（含名称），再按沪深 A 股代码规则过滤
-        掉指数等非个股；industry baostock 提供不了，置空（预留字段）。
+        用 query_all_stock 一次取得当日证券列表（含名称），按沪深 A 股代码规则过滤
+        掉指数等非个股；行业用 query_stock_industry 补齐（失败则置空，不阻断）。
         """
         from ..services.stock_service import is_a_stock, suggest_trade_day
 
         day = suggest_trade_day(self)
         rs = self._query(lambda: bs.query_all_stock(day=day))
         rows = self._rows(rs, day)
+        try:
+            industry = self.stock_industry()
+        except Exception:  # noqa: BLE001  行业拉取失败不阻断名单初始化
+            industry = {}
         out = []
         for r in rows:
             code = str(r.get("code") or "")
             if not is_a_stock(code):
                 continue
+            norm = code.replace(".", "")               # sh.600000 → sh600000
             out.append({
-                "code": code.replace(".", ""),               # sh.600000 → sh600000（文件名不含点）
+                "code": norm,
                 "name": str(r.get("code_name") or "").strip(),
-                "industry": "",
+                "industry": industry.get(norm, ""),
             })
         return out
