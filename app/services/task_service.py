@@ -125,6 +125,21 @@ class TaskService:
         self._q.put(task.id)
         return task
 
+    def enqueue_report(self, db: Session, params: dict = None) -> TaskRun:
+        """创建每日大盘汇总任务（kind=report），queued 并入队。ref_id=0（无外部引用）。"""
+        task = TaskRun(
+            kind="report",
+            ref_id=0,
+            ref_name="每日大盘汇总",
+            status="queued",
+            params=params or {},
+        )
+        db.add(task)
+        db.commit()
+        db.refresh(task)
+        self._q.put(task.id)
+        return task
+
     # ---------- 任务终止支持 ----------
     def _register(self, task_id: int, proc: "subprocess.Popen" = None) -> None:
         """登记任务的取消事件与（可选）子进程句柄。"""
@@ -190,6 +205,8 @@ class TaskService:
 
             if task.kind == "ingest":
                 result = self._run_ingest(task, log_path)
+            elif task.kind == "report":
+                result = self._run_report(task, log_path)
             else:
                 # 取策略定义
                 strategy = db.query(Strategy).get(task.ref_id)
@@ -206,6 +223,8 @@ class TaskService:
             task.finished_at = datetime.now()
             task.exit_code = result["exit_code"]
             task.result_summary = result["summary"]
+            if result.get("output_files"):
+                task.output_files = result["output_files"]
             task.status = result["status"]
             db.commit()
         except Exception as exc:  # noqa: BLE001
@@ -293,6 +312,36 @@ class TaskService:
                 "status": "failed",
                 "summary": {"error": str(exc)},
             }
+        finally:
+            self._unregister(task.id)
+
+    def _run_report(self, task, log_path: Path) -> dict:
+        """每日大盘汇总：走 report_service，日志写任务日志文件。"""
+        from . import report_service
+        self._register(task.id)
+        try:
+            log_path.write_text("$ 每日大盘汇总\n", encoding="utf-8")
+
+            def _log(line: str) -> None:
+                with open(log_path, "a", encoding="utf-8") as f:
+                    f.write(line + "\n")
+
+            db = SessionLocal()
+            try:
+                res = report_service.run_daily_report(self.cfg, db, log=_log, send=True)
+            finally:
+                db.close()
+            status = res.get("status", "failed")
+            return {
+                "exit_code": 0 if status == "success" else None,
+                "status": status,
+                "summary": {k: v for k, v in res.items() if k != "metrics"},
+                "output_files": res.get("output_files") or [],
+            }
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("报告任务 %s 异常", task.id)
+            return {"exit_code": None, "status": "failed",
+                    "summary": {"error": str(exc)}, "output_files": []}
         finally:
             self._unregister(task.id)
 
