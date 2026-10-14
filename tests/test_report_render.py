@@ -36,6 +36,15 @@ def test_render_contains_all_sections_and_colors():
     assert "2026-10-13" in html
 
 
+def test_render_escapes_html_in_external_text():
+    """模板名 daily_report.html.j2 也必须启用自动转义：外部文本里的 HTML 需被转义。"""
+    m = _metrics()
+    m["index"]["rows"][0]["name"] = "<script>alert(1)</script>"
+    html = report_render.render_report(m, "2026-10-13")
+    assert "<script>alert(1)</script>" not in html
+    assert "&lt;script&gt;" in html
+
+
 def test_render_shows_missing_sections():
     m = _metrics(missing=["核心指数", "行业"])
     m["index"] = {"available": False, "rows": []}

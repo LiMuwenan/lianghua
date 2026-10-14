@@ -10,7 +10,8 @@ FLAT_COLOR = "#6a737d"
 
 _TPL_DIR = Path(__file__).resolve().parents[1] / "templates"   # app/templates
 _env = Environment(loader=FileSystemLoader(str(_TPL_DIR)),
-                   autoescape=select_autoescape(["html", "xml"]))
+                   # 模板名以 .j2 结尾，故扩展名列表须含 j2，否则 select_autoescape 判定为关闭
+                   autoescape=select_autoescape(["html", "xml", "j2"]))
 
 
 def _pctcolor(v):
