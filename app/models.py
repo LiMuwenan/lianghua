@@ -53,7 +53,7 @@ class TaskRun(Base):
     ref_id = Column(Integer, nullable=True)
     ref_name = Column(String, default="")                   # 冗余名称，便于展示
     params = Column(JSON, default=dict)
-    # 合法状态集合：queued/running/success/failed/partial_failed/aborted
+    # 合法状态集合：queued/running/success/failed/partial_failed/aborted/skipped
     status = Column(String, default="queued")
     started_at = Column(DateTime, nullable=True)
     finished_at = Column(DateTime, nullable=True)

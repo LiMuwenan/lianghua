@@ -3,7 +3,7 @@
 
 设计要点（对齐方案文档第 4/11 节）：
 - 同一时刻只执行一个任务（串行），避免子进程互相踩数据目录。
-- 任务状态：queued → running → success/failed/partial_failed。
+- 任务状态：queued → running → success/failed/partial_failed/skipped。
 - 实时抓取 stdout/stderr 写入 outputs/logs/{task_id}.log，UTF-8。
 - 参数覆盖：临时参数化副本，在原脚本目录作为工作目录运行，原文件不动。
 - 单任务超时后 kill 子进程（subprocess 超时 + kill）。

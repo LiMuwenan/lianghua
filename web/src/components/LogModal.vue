@@ -38,7 +38,7 @@ const pre = ref(null)
 let timer = null
 
 const statusLabel = (s) =>
-  ({ success: '（已结束）', failed: '（已结束）', aborted: '（已终止）', partial_failed: '（已结束）' }[s] || '')
+  ({ success: '（已结束）', failed: '（已结束）', aborted: '（已终止）', partial_failed: '（已结束）', skipped: '（已跳过）' }[s] || '')
 
 async function refresh() {
   if (props.taskId == null) return
@@ -48,7 +48,7 @@ async function refresh() {
     status.value = r.status
     statusText.value = statusLabel(r.status)
     if (pre.value && autoTail.value) pre.value.scrollTop = pre.value.scrollHeight
-    if (['success', 'failed', 'partial_failed', 'aborted'].includes(r.status)) {
+    if (['success', 'failed', 'partial_failed', 'aborted', 'skipped'].includes(r.status)) {
       stop()
     }
   } catch (e) { /* 任务日志未就绪等，忽略 */ }
