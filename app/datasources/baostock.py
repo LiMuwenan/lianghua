@@ -111,6 +111,18 @@ class BaostockDataSource(BaseStockDataSource):
                 continue
         return out
 
+    def index_daily(self, code: str, start_date: str, end_date: str) -> List[dict]:
+        """指数日线：query_history_k_data_plus，约 10 列，无复权/估值。
+
+        baostock 对指数返回 date/code/open/high/low/close/preclose/volume/amount/pctChg。
+        未收录的指数返回空行（由上层「取不到则跳过」处理）。
+        """
+        fields = "date,code,open,high,low,close,preclose,volume,amount,pctChg"
+        rs = self._query(lambda: bs.query_history_k_data_plus(
+            code, fields, start_date=start_date, end_date=end_date,
+            frequency="d", adjustflag="3"))
+        return self._rows(rs, f"{code}|{start_date}~{end_date}")
+
     def universe(self, date: str) -> List[str]:
         rs = self._query(lambda: bs.query_all_stock(day=date))
         rows = self._rows(rs, date)
