@@ -75,3 +75,53 @@ def compute_breadth(df: pd.DataFrame) -> dict:
         "suspended": int(suspended_mask.sum()),
         "total": int(len(live)),
     }
+
+
+def _num_sum(df: pd.DataFrame, col: str):
+    if df is None or df.empty or col not in df.columns:
+        return None
+    s = pd.to_numeric(df[col], errors="coerce")
+    return None if s.dropna().empty else float(s.sum())
+
+
+def compute_volume(df: pd.DataFrame, prev_amount, ma5_amount) -> dict:
+    """全市场成交额/量、平均换手率；对比前一日与近 5 日均值给出放量/缩量。"""
+    if df is None or df.empty:
+        return {"amount": None, "volume": None, "turn_avg": None,
+                "vs_prev_pct": None, "vs_ma5_pct": None, "state": None}
+    amount = _num_sum(df, "amount")
+    volume = _num_sum(df, "volume")
+    turn = pd.to_numeric(df.get("turn"), errors="coerce")
+    turn_avg = None if turn.dropna().empty else float(turn.mean())
+
+    vs_prev = (amount / prev_amount - 1) * 100 if (amount is not None and prev_amount) else None
+    vs_ma5 = (amount / ma5_amount - 1) * 100 if (amount is not None and ma5_amount) else None
+    state = None
+    if vs_ma5 is not None:
+        state = "放量" if vs_ma5 > 0 else "缩量"
+    return {"amount": amount, "volume": volume, "turn_avg": turn_avg,
+            "vs_prev_pct": vs_prev, "vs_ma5_pct": vs_ma5, "state": state}
+
+
+def _percentile(series, value):
+    """value 在 series 中的分位（%）：<= value 的比例。series 可含 None/NaN。"""
+    if value is None:
+        return None
+    vals = [float(x) for x in (series or [])
+            if x is not None and not (isinstance(x, float) and math.isnan(x))]
+    if not vals:
+        return None
+    return round(sum(1 for x in vals if x <= value) / len(vals) * 100, 2)
+
+
+def compute_valuation(df: pd.DataFrame, hist_pe, hist_pb) -> dict:
+    """PE/PB 中位数 + 近一年分位。"""
+    if df is None or df.empty:
+        return {"pe_median": None, "pb_median": None, "pe_pct_1y": None, "pb_pct_1y": None}
+    pe = pd.to_numeric(df.get("peTTM"), errors="coerce")
+    pb = pd.to_numeric(df.get("pbMRQ"), errors="coerce")
+    pe_med = None if pe.dropna().empty else float(pe.median())
+    pb_med = None if pb.dropna().empty else float(pb.median())
+    return {"pe_median": pe_med, "pb_median": pb_med,
+            "pe_pct_1y": _percentile(hist_pe, pe_med),
+            "pb_pct_1y": _percentile(hist_pb, pb_med)}
