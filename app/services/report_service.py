@@ -8,7 +8,7 @@
 """
 import logging
 import os
-from datetime import date, datetime
+from datetime import date, timedelta
 from pathlib import Path
 
 from sqlalchemy import func
@@ -25,32 +25,30 @@ def resolve_trade_date(today: str | None = None, lookback_days: int = 15):
     """最近交易日（<= today）：走 ingest._trade_dates 钩子；取不到返回 None。"""
     from . import ingest
     today = today or date.today().isoformat()
-    start = (date.fromisoformat(today) - __import__("datetime").timedelta(days=lookback_days)).isoformat()
+    start = (date.fromisoformat(today) - timedelta(days=lookback_days)).isoformat()
     days = ingest._trade_dates(start, today)
     return days[-1] if days else None
 
 
 def _stock_latest(db, data_dir) -> str | None:
-    """个股最新日期：优先元库断点表最大值，其次扫描目录内文件 date 列。"""
+    """个股最新日期：优先元库断点表最大值；为空时用 DuckDB 全量取目录内 parquet 的 date 最大值。"""
     try:
         row = db.query(func.max(StockFreshness.latest_date)).scalar()
     except Exception:  # noqa: BLE001
         row = None
     if row is not None:
         return row.isoformat() if hasattr(row, "isoformat") else str(row)
-    d = Path(data_dir)
-    if not d.is_dir():
+    if not market_summary._has_parquet(data_dir):
         return None
-    best = None
-    for p in sorted(d.glob("*.parquet"))[:200]:
-        try:
-            df = __import__("pandas").read_parquet(p, columns=["date"])
-            if not df.empty:
-                v = str(df["date"].max())
-                best = v if best is None or v > best else best
-        except Exception:  # noqa: BLE001
-            continue
-    return best
+    import duckdb
+    con = duckdb.connect()
+    try:
+        v = con.execute(
+            f"SELECT MAX(date) FROM read_parquet('{market_summary._parquet_glob(data_dir)}')"
+        ).fetchone()[0]
+    finally:
+        con.close()
+    return None if v is None else str(v)
 
 
 def readiness_check(cfg, db, trade_date: str) -> dict:
@@ -78,19 +76,30 @@ def _stock_maps(db):
             {r.code: (r.name or "") for r in rows})
 
 
-def generate(cfg, db, trade_date: str) -> dict:
-    """汇总 + 渲染 + 归档，返回 {trade_date, metrics, html, html_path}。"""
+def build_metrics(cfg, db, trade_date: str) -> dict:
+    """汇总指标：跨股读 parquet + 指数 + 行业/名称映射。"""
     industry_map, name_map = _stock_maps(db)
-    metrics = market_summary.build_summary(
+    return market_summary.build_summary(
         cfg.data_dir, cfg.index_dir, trade_date,
         cfg.report_index_codes, industry_map, name_map)
+
+
+def render_only(cfg, db, trade_date: str) -> dict:
+    """仅汇总 + 渲染，不落盘（供预览）。返回 {trade_date, metrics, html}。"""
+    metrics = build_metrics(cfg, db, trade_date)
     html = report_render.render_report(metrics, trade_date, cfg.report_subject_prefix)
+    return {"trade_date": trade_date, "metrics": metrics, "html": html}
+
+
+def generate(cfg, db, trade_date: str) -> dict:
+    """汇总 + 渲染 + 归档，返回 {trade_date, metrics, html, html_path}。"""
+    out = render_only(cfg, db, trade_date)
     out_dir = Path(cfg.output_dir) / "reports"
     out_dir.mkdir(parents=True, exist_ok=True)
     html_path = out_dir / f"{trade_date}.html"
-    html_path.write_text(html, encoding="utf-8")
-    return {"trade_date": trade_date, "metrics": metrics,
-            "html": html, "html_path": str(html_path)}
+    html_path.write_text(out["html"], encoding="utf-8")
+    out["html_path"] = str(html_path)
+    return out
 
 
 def _send(cfg, trade_date: str, html: str, log) -> dict:

@@ -14,12 +14,12 @@ router = APIRouter(prefix="/api/reports", tags=["reports"])
 
 @router.get("/daily/preview")
 def preview(db: Session = Depends(get_db)):
-    """渲染当日汇总 HTML（不发送、不落库；不含指数补抓等写操作）。"""
+    """渲染当日汇总 HTML（只渲染、不发送、不落库、不写归档文件）。"""
     cfg = load_config()
     trade_date = report_service.resolve_trade_date()
     if not trade_date:
         raise HTTPException(409, "无法确定最近交易日（数据源未就绪）")
-    gen = report_service.generate(cfg, db, trade_date)
+    gen = report_service.render_only(cfg, db, trade_date)
     return {"trade_date": trade_date, "html": gen["html"]}
 
 

@@ -29,19 +29,23 @@ def _client(tmp_path, monkeypatch):
     return TestClient(app), DB
 
 
-def test_preview_returns_html(tmp_path, monkeypatch):
+def test_preview_returns_html_without_archiving(tmp_path, monkeypatch):
+    """预览只渲染不归档：不得在 output_dir/reports 下产生文件。"""
     client, DB = _client(tmp_path, monkeypatch)
 
-    class FakeGen:
-        def generate(self, cfg, db, td):
-            return {"trade_date": td, "html": "<html>ok</html>", "metrics": {}}
+    class FakeCfg:
+        output_dir = tmp_path / "outputs"
+        report_subject_prefix = "A股每日大盘汇总"
 
+    monkeypatch.setattr(reports, "load_config", lambda: FakeCfg())
     monkeypatch.setattr(reports.report_service, "resolve_trade_date", lambda *a, **k: "2026-10-13")
-    monkeypatch.setattr(reports.report_service, "generate", FakeGen().generate)
+    monkeypatch.setattr(reports.report_service, "render_only",
+                        lambda cfg, db, td: {"trade_date": td, "html": "<html>ok</html>", "metrics": {}})
     r = client.get("/api/reports/daily/preview")
     assert r.status_code == 200
     assert "ok" in r.json()["html"]
     assert r.json()["trade_date"] == "2026-10-13"
+    assert not (FakeCfg.output_dir / "reports").exists()
 
 
 def test_run_enqueues_task(tmp_path, monkeypatch):

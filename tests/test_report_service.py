@@ -47,6 +47,22 @@ def test_resolve_trade_date(monkeypatch):
     assert report_service.resolve_trade_date("2026-10-14") is None
 
 
+def test_stock_latest_fallback_scans_all_files(tmp_path):
+    """断点表为空时回退扫描需覆盖全部文件，最新日期不在前 200 个文件名中也要取到。"""
+    cfg = _cfg(tmp_path)
+    for i in range(205):
+        _write_stock(cfg.data_dir, f"sh60{i:04d}", "2026-10-13" if i == 204 else "2026-01-02")
+
+    class DB:
+        def query(self, *a, **k):
+            class Q:
+                def scalar(self):
+                    return None
+            return Q()
+
+    assert report_service._stock_latest(DB(), cfg.data_dir) == "2026-10-13"
+
+
 def test_run_skips_when_not_ready(tmp_path, monkeypatch):
     cfg = _cfg(tmp_path)
     monkeypatch.setattr(ingest, "_trade_dates", lambda s, e: ["2026-10-13"])
