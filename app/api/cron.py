@@ -52,11 +52,15 @@ def create_cron(req: CronCreate, db: Session = Depends(get_db)):
     """新建定时任务；校验 ref_id 存在性，创建后同步调度器。"""
     _validate_cron(req.cron_expr, req.name)
     kind = req.kind or "ingest"
-    # 校验引用对象存在
-    from ..models import Dataset, Strategy
-    if not db.query(Dataset if kind == "ingest" else Strategy).get(req.ref_id):
-        raise HTTPException(404, f"引用的{'数据集' if kind == 'ingest' else '策略'}不存在: ref_id={req.ref_id}")
-    ct = CronTask(name=req.name, kind=kind, ref_id=req.ref_id,
+    # 校验引用对象存在（report 无外部引用，固定 ref_id=0）
+    if kind == "report":
+        ref_id = 0
+    else:
+        from ..models import Dataset, Strategy
+        if not db.query(Dataset if kind == "ingest" else Strategy).get(req.ref_id):
+            raise HTTPException(404, f"引用的{'数据集' if kind == 'ingest' else '策略'}不存在: ref_id={req.ref_id}")
+        ref_id = req.ref_id
+    ct = CronTask(name=req.name, kind=kind, ref_id=ref_id,
                   cron_expr=req.cron_expr, params=req.params or {},
                   enabled=req.enabled)
     db.add(ct)
@@ -106,7 +110,9 @@ def trigger_cron(cid: int, db: Session = Depends(get_db)):
         raise HTTPException(404, "定时任务不存在")
     from ..services.task_service import get_service
     svc = get_service()
-    if ct.kind == "ingest":
+    if ct.kind == "report":
+        svc.enqueue_report(db)
+    elif ct.kind == "ingest":
         from ..models import Dataset
         ds = db.query(Dataset).get(ct.ref_id)
         if ds is None:

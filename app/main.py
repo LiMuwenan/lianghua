@@ -10,11 +10,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
-from .api import cron, datasets, strategies, tasks, stocks
+from .api import cron, datasets, reports, strategies, tasks, stocks
 from .config import Config, load_config
 from .database import init_db
 from .datasources.baostock import BaostockDataSource
-from .services import dataset_scan, ingest, scanner
+from .services import dataset_scan, index_ingest, ingest, report_service, scanner
 from .services.scheduler import get_scheduler
 from .services.task_service import init_task_service, get_service
 
@@ -47,6 +47,7 @@ app.include_router(strategies.router)
 app.include_router(tasks.router)
 app.include_router(cron.router)
 app.include_router(stocks.router)
+app.include_router(reports.router)
 
 
 def _cron_trigger(ct) -> None:
@@ -60,6 +61,8 @@ def _cron_trigger(ct) -> None:
             ds = db.query(Dataset).get(ct.ref_id)
             if ds is not None:
                 svc.enqueue_ingest(db, ds.name, ds.id, params=ct.params or {})
+        elif ct.kind == "report":
+            svc.enqueue_report(db)
         else:
             strategy = db.query(Strategy).get(ct.ref_id)
             if strategy is not None:
@@ -76,6 +79,7 @@ def on_startup():
     # 不在此发起 baostock 登录（会话会过期）；改为首次查询时由 _query() 惰性登录
     app.state.ds = _ds                       # 供个股初始化等服务使用
     ingest.bind_source(_ds)
+    index_ingest.bind_source(_ds)
     # 启动任务执行线程
     service = init_task_service(cfg)
     service.start()
@@ -88,6 +92,7 @@ def on_startup():
     sched = get_scheduler()
     sched.bind(_cron_trigger)
     with SessionLocal() as db:
+        report_service.ensure_report_cron(db, cfg)
         sched.restore(db)
     sched.start()
 
