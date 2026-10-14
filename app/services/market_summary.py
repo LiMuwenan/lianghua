@@ -125,3 +125,184 @@ def compute_valuation(df: pd.DataFrame, hist_pe, hist_pb) -> dict:
     return {"pe_median": pe_med, "pb_median": pb_med,
             "pe_pct_1y": _percentile(hist_pe, pe_med),
             "pb_pct_1y": _percentile(hist_pb, pb_med)}
+
+
+def compute_industry(df: pd.DataFrame, industry_map: dict, top_n: int = 5) -> dict:
+    """按行业分组求平均涨跌幅，返回领涨/领跌 TOP n。industry_map: {code: industry}。"""
+    if df is None or df.empty:
+        return {"top": [], "bottom": []}
+    d = df.copy()
+    d["industry"] = d["code"].map(lambda c: (industry_map or {}).get(c, "") or "")
+    d = d[d["industry"] != ""]
+    d["pctChg"] = pd.to_numeric(d["pctChg"], errors="coerce")
+    d = d[d["pctChg"].notna()]
+    if d.empty:
+        return {"top": [], "bottom": []}
+    g = d.groupby("industry")["pctChg"].agg(["mean", "count"]).sort_values("mean", ascending=False)
+
+    def _items(frame):
+        return [{"industry": str(i), "avg_pct": round(float(r["mean"]), 2),
+                 "count": int(r["count"])} for i, r in frame.iterrows()]
+
+    return {"top": _items(g.head(top_n)), "bottom": _items(g.tail(top_n).iloc[::-1])}
+
+
+def compute_hot(df: pd.DataFrame, name_map: dict = None, top_n: int = 10) -> dict:
+    """涨/跌幅榜 TOP n（剔停牌），附股票名称。"""
+    if df is None or df.empty:
+        return {"gainers": [], "losers": []}
+    st_num = pd.to_numeric(df.get("tradestatus"), errors="coerce")
+    vol = pd.to_numeric(df.get("volume"), errors="coerce").fillna(0)
+    live = df[(st_num == 1) & (vol > 0)].copy()
+    live["pctChg"] = pd.to_numeric(live["pctChg"], errors="coerce")
+    live = live[live["pctChg"].notna()]
+
+    def _items(frame):
+        return [{"code": str(r["code"]), "name": (name_map or {}).get(r["code"], ""),
+                 "pctChg": round(float(r["pctChg"]), 2)} for _, r in frame.iterrows()]
+
+    g = live.sort_values("pctChg", ascending=False)
+    return {"gainers": _items(g.head(top_n)), "losers": _items(g.tail(top_n).iloc[::-1])}
+
+
+def make_conclusion(index_rows, breadth, volume) -> str:
+    """一句话结论：由指数涨跌 + 涨跌家数比 + 放量/缩量规则生成。"""
+    parts = []
+    sh = next((r for r in (index_rows or []) if str(r["code"]).endswith("000001")), None)
+    if sh and sh.get("pctChg") is not None:
+        parts.append(f"上证综指{'+' if sh['pctChg'] >= 0 else ''}{sh['pctChg']:.2f}%")
+    if breadth and breadth.get("up") is not None:
+        parts.append(f"上涨{breadth['up']}家/下跌{breadth['down']}家")
+    if volume and volume.get("state"):
+        parts.append(volume["state"])
+    return "，".join(parts) + "。" if parts else "数据缺失，暂无法生成结论。"
+
+
+# ---------- IO 层 ----------
+
+def _parquet_glob(data_dir) -> str:
+    return Path(data_dir).as_posix().rstrip("/") + "/*.parquet"
+
+
+def _has_parquet(data_dir) -> bool:
+    d = Path(data_dir)
+    return d.is_dir() and any(d.glob("*.parquet"))
+
+
+def _read_cross_section(data_dir, trade_date: str) -> pd.DataFrame:
+    """读全市场当日的横截面（DuckDB 谓词下推）。无文件 → 空表。"""
+    cols = "code,pctChg,tradestatus,volume,amount,turn,peTTM,pbMRQ,isST"
+    if not _has_parquet(data_dir):
+        return pd.DataFrame(columns=cols.split(","))
+    import duckdb
+    con = duckdb.connect()
+    try:
+        q = (f"SELECT {cols} FROM read_parquet('{_parquet_glob(data_dir)}') "
+             f"WHERE date = '{trade_date}'")
+        return con.execute(q).df()
+    finally:
+        con.close()
+
+
+def _daily_amount_series(data_dir, trade_date: str, n: int = 6) -> list:
+    """按日聚合的全市场成交额，返回 [(date, amount)] 降序（含当日）。"""
+    if not _has_parquet(data_dir):
+        return []
+    import duckdb
+    con = duckdb.connect()
+    try:
+        q = (f"SELECT date, SUM(amount) AS amount FROM "
+             f"read_parquet('{_parquet_glob(data_dir)}') WHERE date <= '{trade_date}' "
+             f"GROUP BY date ORDER BY date DESC LIMIT {n}")
+        return [(str(d), float(a) if a is not None else 0.0) for d, a in con.execute(q).fetchall()]
+    finally:
+        con.close()
+
+
+def _daily_median_series(data_dir, trade_date: str, col: str, days: int = 250) -> list:
+    """按日的某列全市场中位数序列（近 days 日，含当日），用于算近一年分位。"""
+    if not _has_parquet(data_dir):
+        return []
+    import duckdb
+    con = duckdb.connect()
+    try:
+        q = (f"SELECT MEDIAN({col}) AS m FROM read_parquet('{_parquet_glob(data_dir)}') "
+             f"WHERE date <= '{trade_date}' GROUP BY date ORDER BY date DESC LIMIT {days}")
+        return [float(m) if m is not None else None for (m,) in con.execute(q).fetchall()]
+    finally:
+        con.close()
+
+
+def _index_rows(index_dir, code: str, trade_date: str):
+    """取某指数当日行 → dict（无数据返回 None）。"""
+    from . import index_store
+    df = index_store.read_index(index_dir, code)
+    if df.empty:
+        return None
+    df = df.copy()
+    df["date"] = df["date"].astype(str)
+    sub = df[df["date"] == trade_date]
+    if sub.empty:
+        return None
+    r = sub.iloc[0]
+    norm = index_store.normalize(code)
+    return {
+        "code": norm, "name": INDEX_NAMES.get(norm, norm),
+        "close": None if pd.isna(r["close"]) else float(r["close"]),
+        "pctChg": None if pd.isna(r["pctChg"]) else round(float(r["pctChg"]), 2),
+        "amount": None if pd.isna(r["amount"]) else float(r["amount"]),
+    }
+
+
+def build_summary(data_dir, index_dir, trade_date: str, index_codes,
+                  industry_map: dict, name_map: dict) -> dict:
+    """拼装完整指标 dict。data_dir/index_dir 为目录路径。"""
+    missing = []
+
+    cross = _read_cross_section(data_dir, trade_date)
+    breadth = compute_breadth(cross)
+    if breadth["total"] == 0:
+        missing.append("市场宽度")
+
+    series = _daily_amount_series(data_dir, trade_date, n=6)
+    prev_amount = series[1][1] if len(series) > 1 else None
+    ma5 = [a for _, a in series[1:6]]
+    ma5_amount = (sum(ma5) / len(ma5)) if ma5 else None
+    volume = compute_volume(cross, prev_amount, ma5_amount)
+    if volume["amount"] is None:
+        missing.append("量能")
+
+    hist_pe = _daily_median_series(data_dir, trade_date, "peTTM", 250)
+    hist_pb = _daily_median_series(data_dir, trade_date, "pbMRQ", 250)
+    valuation = compute_valuation(cross, hist_pe, hist_pb)
+    if valuation["pe_median"] is None:
+        missing.append("估值")
+
+    industry = compute_industry(cross, industry_map)
+    if not industry["top"] and not industry["bottom"]:
+        missing.append("行业")
+
+    hot = compute_hot(cross, name_map)
+    if not hot["gainers"] and not hot["losers"]:
+        missing.append("个股热度")
+
+    rows = []
+    for code in index_codes:
+        r = _index_rows(index_dir, code, trade_date)
+        if r is not None:
+            rows.append(r)
+    index_block = {"available": bool(rows), "rows": rows}
+    if not rows:
+        missing.append("核心指数")
+
+    return {
+        "trade_date": trade_date,
+        "index": index_block,
+        "breadth": breadth,
+        "volume": volume,
+        "valuation": valuation,
+        "industry": industry,
+        "hot": hot,
+        "conclusion": make_conclusion(rows, breadth, volume),
+        "missing": sorted(set(missing)),
+    }
