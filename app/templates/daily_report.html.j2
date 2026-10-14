@@ -1,0 +1,133 @@
+{# 每日 A股大盘汇总邮件模板：纯 table + 内联 CSS，A股红涨绿跌，适配 Outlook/手机邮箱 #}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8" /><title>{{ m.trade_date }} A股大盘汇总</title></head>
+<body style="margin:0;padding:16px;background:#f5f6f8;font-family:-apple-system,'Microsoft YaHei',Arial,sans-serif;color:#1f2328;">
+<div style="max-width:720px;margin:0 auto;background:#ffffff;border:1px solid #e3e6ea;border-radius:8px;padding:20px;">
+
+  <h2 style="margin:0 0 4px;font-size:20px;">{{ subject_prefix or 'A股每日大盘汇总' }} | {{ m.trade_date }}</h2>
+  <p style="margin:0 0 16px;color:#6a737d;font-size:12px;">数据来源：baostock 收盘数据；涨跌停为近似口径，仅供个人参考，不构成任何投资建议。</p>
+
+  {# 一句话结论 #}
+  <div style="background:#f0f4ff;border:1px solid #d6e0ff;border-radius:6px;padding:10px 12px;margin-bottom:16px;font-size:14px;">
+    <strong>一句话结论：</strong>{{ m.conclusion }}
+  </div>
+
+  {# ① 核心指数 #}
+  <h3 style="font-size:15px;margin:18px 0 8px;border-left:4px solid #d60000;padding-left:8px;">① 核心指数</h3>
+  {% if m.index.available %}
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead><tr style="background:#fafbfc;">
+      <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e3e6ea;">指数</th>
+      <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #e3e6ea;">收盘</th>
+      <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #e3e6ea;">涨跌幅</th>
+      <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #e3e6ea;">成交额(亿)</th>
+    </tr></thead>
+    <tbody>
+      {% for r in m.index.rows %}
+      <tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;">{{ r.name }}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;text-align:right;">{{ r.close | fmtnum(2) }}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;text-align:right;color:{{ r.pctChg | pctcolor }};font-weight:600;">{{ r.pctChg | pct }}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;text-align:right;">{{ r.amount | yi2 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p style="color:#999;font-size:13px;">数据缺失</p>{% endif %}
+
+  {# ② 市场宽度 #}
+  <h3 style="font-size:15px;margin:18px 0 8px;border-left:4px solid #d60000;padding-left:8px;">② 市场宽度</h3>
+  {% if m.breadth.total %}
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <tr>
+      <td style="padding:6px 8px;">上涨 <b style="color:{{ 1 | pctcolor }};">{{ m.breadth.up }}</b> 家</td>
+      <td style="padding:6px 8px;">下跌 <b style="color:{{ -1 | pctcolor }};">{{ m.breadth.down }}</b> 家</td>
+      <td style="padding:6px 8px;">平盘 {{ m.breadth.flat }} 家</td>
+    </tr>
+    <tr>
+      <td style="padding:6px 8px;">涨停(近似) <b style="color:{{ 1 | pctcolor }};">{{ m.breadth.limit_up }}</b> 家</td>
+      <td style="padding:6px 8px;">跌停(近似) <b style="color:{{ -1 | pctcolor }};">{{ m.breadth.limit_down }}</b> 家</td>
+      <td style="padding:6px 8px;">停牌 {{ m.breadth.suspended }} 家</td>
+    </tr>
+  </table>
+  {% else %}<p style="color:#999;font-size:13px;">数据缺失</p>{% endif %}
+
+  {# ③ 量能 #}
+  <h3 style="font-size:15px;margin:18px 0 8px;border-left:4px solid #d60000;padding-left:8px;">③ 量能</h3>
+  {% if m.volume.amount is not none %}
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <tr><td style="padding:6px 8px;">全市场成交额</td><td style="padding:6px 8px;">{{ m.volume.amount | yi2 }} 亿</td>
+        <td style="padding:6px 8px;">较前一日</td><td style="padding:6px 8px;color:{{ m.volume.vs_prev_pct | pctcolor }};">{{ m.volume.vs_prev_pct | pct }}</td></tr>
+    <tr><td style="padding:6px 8px;">平均换手率</td><td style="padding:6px 8px;">{{ m.volume.turn_avg | fmtnum(2) }}%</td>
+        <td style="padding:6px 8px;">较5日均值</td><td style="padding:6px 8px;color:{{ m.volume.vs_ma5_pct | pctcolor }};">{{ m.volume.vs_ma5_pct | pct }}（{{ m.volume.state or '—' }}）</td></tr>
+  </table>
+  {% else %}<p style="color:#999;font-size:13px;">数据缺失</p>{% endif %}
+
+  {# ④ 估值 #}
+  <h3 style="font-size:15px;margin:18px 0 8px;border-left:4px solid #d60000;padding-left:8px;">④ 估值</h3>
+  {% if m.valuation.pe_median is not none %}
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <tr><td style="padding:6px 8px;">PE(TTM) 中位数</td><td style="padding:6px 8px;">{{ m.valuation.pe_median | fmtnum(2) }}</td>
+        <td style="padding:6px 8px;">近一年分位</td><td style="padding:6px 8px;">{{ m.valuation.pe_pct_1y | fmtnum(1) }}%</td></tr>
+    <tr><td style="padding:6px 8px;">PB(MRQ) 中位数</td><td style="padding:6px 8px;">{{ m.valuation.pb_median | fmtnum(2) }}</td>
+        <td style="padding:6px 8px;">近一年分位</td><td style="padding:6px 8px;">{{ m.valuation.pb_pct_1y | fmtnum(1) }}%</td></tr>
+  </table>
+  {% else %}<p style="color:#999;font-size:13px;">数据缺失</p>{% endif %}
+
+  {# ⑤ 行业 #}
+  <h3 style="font-size:15px;margin:18px 0 8px;border-left:4px solid #d60000;padding-left:8px;">⑤ 行业（按行业成分平均涨跌幅）</h3>
+  {% if m.industry.top or m.industry.bottom %}
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead><tr style="background:#fafbfc;">
+      <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e3e6ea;">领涨 TOP5</th>
+      <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #e3e6ea;">均涨幅</th>
+      <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e3e6ea;">领跌 TOP5</th>
+      <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #e3e6ea;">均跌幅</th>
+    </tr></thead>
+    <tbody>
+      {% for i in range([m.industry.top|length, m.industry.bottom|length]|max) %}
+      <tr>
+        {% set t = m.industry.top[i] if i < m.industry.top|length else none %}
+        {% set b = m.industry.bottom[i] if i < m.industry.bottom|length else none %}
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;">{{ t.industry if t else '—' }}{% if t %} <span style="color:#999;">({{ t.count }})</span>{% endif %}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;text-align:right;color:{{ (t.avg_pct if t else 0) | pctcolor }};">{{ t.avg_pct | pct if t else '—' }}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;">{{ b.industry if b else '—' }}{% if b %} <span style="color:#999;">({{ b.count }})</span>{% endif %}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;text-align:right;color:{{ (b.avg_pct if b else 0) | pctcolor }};">{{ b.avg_pct | pct if b else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p style="color:#999;font-size:13px;">数据缺失</p>{% endif %}
+
+  {# ⑥ 个股热度 #}
+  <h3 style="font-size:15px;margin:18px 0 8px;border-left:4px solid #d60000;padding-left:8px;">⑥ 个股热度</h3>
+  {% if m.hot.gainers or m.hot.losers %}
+  <table style="width:100%;border-collapse:collapse;font-size:13px;">
+    <thead><tr style="background:#fafbfc;">
+      <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e3e6ea;">涨幅榜 TOP10</th>
+      <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #e3e6ea;">涨幅</th>
+      <th style="text-align:left;padding:6px 8px;border-bottom:1px solid #e3e6ea;">跌幅榜 TOP10</th>
+      <th style="text-align:right;padding:6px 8px;border-bottom:1px solid #e3e6ea;">跌幅</th>
+    </tr></thead>
+    <tbody>
+      {% for i in range([m.hot.gainers|length, m.hot.losers|length]|max) %}
+      <tr>
+        {% set g = m.hot.gainers[i] if i < m.hot.gainers|length else none %}
+        {% set l = m.hot.losers[i] if i < m.hot.losers|length else none %}
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;">{{ (g.name ~ ' ' ~ g.code) if g else '—' }}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;text-align:right;color:{{ (g.pctChg if g else 0) | pctcolor }};">{{ g.pctChg | pct if g else '—' }}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;">{{ (l.name ~ ' ' ~ l.code) if l else '—' }}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f0f1f3;text-align:right;color:{{ (l.pctChg if l else 0) | pctcolor }};">{{ l.pctChg | pct if l else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p style="color:#999;font-size:13px;">数据缺失</p>{% endif %}
+
+  <p style="margin:18px 0 0;color:#8a9099;font-size:11px;border-top:1px solid #e3e6ea;padding-top:10px;">
+    本邮件由量化平台自动生成（{{ m.trade_date }}）。涨跌停为按 pctChg 阈值的近似口径；数据缺失区块不臆造数值。
+  </p>
+</div>
+</body>
+</html>
