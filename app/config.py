@@ -22,6 +22,26 @@ class Config:
         self.data_dir = Config._p(ROOT, data.get("data_dir", "data/market/daily_price"))
         self.daily_dir = Config._p(ROOT, data.get("daily_dir", r"G:\各种资料\量化数据\A股日K日分组"))
         self.factor_dir = Config._p(ROOT, data.get("factor_dir", r"G:\各种资料\量化数据\复权因子每日"))
+        # 指数 Parquet 目录（与 data_dir 并列，独立分文件夹）
+        self.index_dir = Config._p(ROOT, data.get("index_dir", "data/market/index_daily"))
+        # 报告配置
+        _r = data.get("report", {}) or {}
+        self.report_enabled = bool(_r.get("enabled", True))
+        self.report_cron = str(_r.get("cron", "0 18 * * 1-5"))
+        self.report_subject_prefix = str(_r.get("subject_prefix", "A股每日大盘汇总"))
+        self.report_recipients = list(_r.get("recipients", []) or [])
+        self.report_index_codes = list(_r.get("index_codes", []) or []) or [
+            "sh.000001", "sz.399001", "sz.399006", "sh.000688",
+            "sh.000016", "sh.000300", "sh.000905", "sh.000852",
+        ]
+        # SMTP（发件用 126；授权码从环境变量读取，不入 config）
+        _s = data.get("smtp", {}) or {}
+        self.smtp_host = str(_s.get("host", "smtp.126.com"))
+        self.smtp_port = int(_s.get("port", 465))
+        self.smtp_use_ssl = bool(_s.get("use_ssl", True))
+        self.smtp_username = str(_s.get("username", ""))
+        self.smtp_from = str(_s.get("from_addr", "") or self.smtp_username)
+        self.smtp_password_env = str(_s.get("password_env", "SMTP_PASSWORD"))
         self.cors_origins = data.get("cors_origins", ["http://127.0.0.1:8000"])
         self.scan_dirs = data.get("scan_dirs", ["script", "strategy/strategy"])
         self.datasets = data.get("datasets", [])

@@ -15,6 +15,35 @@ data_dir: F:\market
 daily_dir: "G:\\各种资料\\量化数据\\A股日K日分组"
 factor_dir: "G:\\各种资料\\量化数据\\复权因子每日"
 
+# 指数 Parquet 目录（独立分文件夹，与个股 data_dir 分开；指数无复权/估值）
+index_dir: data/market/index_daily
+
+# 每日大盘汇总邮件：触发 cron / 收件人 / 指数清单
+report:
+  enabled: true
+  cron: "0 18 * * 1-5"
+  recipients:
+    - "your_account@outlook.com"
+  subject_prefix: "A股每日大盘汇总"
+  index_codes:
+    - sh.000001
+    - sz.399001
+    - sz.399006
+    - sh.000688
+    - sh.000016
+    - sh.000300
+    - sh.000905
+    - sh.000852
+
+# SMTP 发件（发件用 126 邮箱；授权码走环境变量 SMTP_PASSWORD，勿写入本文件）
+smtp:
+  host: smtp.126.com
+  port: 465
+  use_ssl: true
+  username: "your_sender@126.com"
+  from_addr: "your_sender@126.com"
+  password_env: SMTP_PASSWORD
+
 # CORS 白名单（仅放行本机来源；含 Vite dev 端口 5173）
 cors_origins:
   - http://127.0.0.1:8000
