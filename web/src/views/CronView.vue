@@ -46,9 +46,10 @@
             <select v-model="form.kind">
               <option value="ingest">数据更新（ingest）</option>
               <option value="strategy">策略/回测（strategy）</option>
+              <option value="report">每日大盘汇总（report）</option>
             </select>
           </div>
-          <div class="field"><label>引用对象（数据/策略）</label>
+          <div class="field" v-if="kind !== 'report'"><label>引用对象（数据/策略）</label>
             <select v-model="form.ref_id">
               <option v-for="d in kind === 'ingest' ? datasets : strategies" :key="d.id" :value="d.id">
                 {{ kind === 'ingest' ? d.name : d.name }}
@@ -82,7 +83,7 @@ const datasets = ref([])
 const strategies = ref([])
 const editing = ref(null)
 const editVisible = ref(false)
-const kindLabel = { ingest: '数据更新', strategy: '策略/回测' }
+const kindLabel = { ingest: '数据更新', strategy: '策略/回测', report: '每日大盘汇总' }
 
 const form = reactive({ name: '', kind: 'ingest', ref_id: null, cron_expr: '', enabled: true })
 const kind = computed(() => form.kind || 'ingest')
@@ -90,6 +91,7 @@ const kind = computed(() => form.kind || 'ingest')
 const fmt = (s) => (s ? new Date(s).toLocaleString() : '—')
 
 function refLabel(c) {
+  if (c.kind === 'report') return '每日大盘汇总'
   const pool = c.kind === 'ingest' ? datasets.value : strategies.value
   const it = pool.find((x) => x.id === c.ref_id)
   return it ? it.name : `#${c.ref_id}`
@@ -116,7 +118,7 @@ function openEdit(c) {
 async function save() {
   if (kind.value === 'ingest' && !datasets.value.length) return alert('尚无数据集可引用')
   if (kind.value === 'strategy' && !strategies.value.length) return alert('尚无策略可引用')
-  const body = { name: form.name, kind: kind.value, ref_id: Number(form.ref_id), cron_expr: form.cron_expr, enabled: form.enabled }
+  const body = { name: form.name, kind: kind.value, ref_id: kind.value === 'report' ? 0 : Number(form.ref_id), cron_expr: form.cron_expr, enabled: form.enabled }
   if (editing.value) await api.patch(`/api/cron/${editing.value.id}`, { name: form.name, cron_expr: form.cron_expr, enabled: form.enabled })
   else await api.post('/api/cron', body)
   editVisible.value = false

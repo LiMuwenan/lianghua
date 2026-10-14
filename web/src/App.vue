@@ -8,6 +8,7 @@
         <router-link to="/strategies">策略/回测</router-link>
         <router-link to="/tasks">任务</router-link>
         <router-link to="/cron">调度</router-link>
+        <router-link to="/reports">大盘汇总</router-link>
       </nav>
       <span class="running-hint" v-if="runningTaskId">⏳ 正在运行任务 #{{ runningTaskId }}</span>
     </header>

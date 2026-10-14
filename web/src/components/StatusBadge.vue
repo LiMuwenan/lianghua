@@ -20,6 +20,7 @@ const map = {
   partial_failed: { cls: 'status-err', label: '部分失败' },
   部分失败: { cls: 'status-err', label: '部分失败' },
   aborted: { cls: 'status-aborted', label: '已终止' },
+  skipped: { cls: 'status-muted', label: '已跳过' },
   未生成: { cls: 'status-muted', label: '未生成' },
 }
 
