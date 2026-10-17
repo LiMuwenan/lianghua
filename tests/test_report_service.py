@@ -4,7 +4,7 @@ from datetime import date
 
 import pandas as pd
 
-from app.services import ingest, report_service, index_store
+from app.services import index_ingest, ingest, report_service, index_store
 
 
 def _cfg(tmp_path):
@@ -123,3 +123,35 @@ def test_run_success_generates_and_sends(tmp_path, monkeypatch):
     # 归档 HTML 存在
     from pathlib import Path
     assert Path(res["html_path"]).is_file()
+
+
+def test_run_daily_report_cancel_before_work(tmp_path, monkeypatch):
+    """终止已置位时：报告编排不得再抓指数/汇总/发邮件，直接返回 aborted。"""
+    cfg = _cfg(tmp_path)
+
+    def boom(*a, **k):
+        raise AssertionError("取消后不应继续执行报告流程")
+
+    monkeypatch.setattr(ingest, "_trade_dates", boom)
+    monkeypatch.setattr(report_service.index_ingest, "run_index_fetch", boom)
+
+    res = report_service.run_daily_report(cfg, None, log=lambda m: None, send=True,
+                                          cancel=lambda: True)
+    assert res["status"] == "aborted"
+    assert res["reason"] == "已终止"
+
+
+def test_run_daily_report_cancel_during_index_fetch(tmp_path, monkeypatch):
+    """指数抓取过程中被终止：逐个指数检查取消，抓完当前指数即退出，不再汇总/发送。"""
+    cfg = _cfg(tmp_path)
+    monkeypatch.setattr(ingest, "_trade_dates", lambda s, e: ["2026-10-13"])
+    monkeypatch.setattr(index_ingest, "_fetch_index", lambda code, s, e: [])
+    state = {"n": 0}
+
+    def count_flag():
+        state["n"] += 1
+        return state["n"] >= 2   # 首次检查放行，其后置位
+
+    res = report_service.run_daily_report(cfg, None, log=lambda m: None, send=True,
+                                          cancel=count_flag)
+    assert res["status"] == "aborted"

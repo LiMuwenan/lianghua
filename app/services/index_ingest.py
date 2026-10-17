@@ -30,10 +30,11 @@ def _next_day(iso: str) -> str:
 
 
 def run_index_fetch(root, codes, end_date: str, start_default: str = "2005-01-01",
-                    log=None) -> dict:
+                    log=None, cancel=None) -> dict:
     """对 codes 逐个增量抓取至 end_date，写 {root}/{code}.parquet。
 
-    返回 {"fetched": {code: rows}, "skipped": [code], "latest": {code: date}}。
+    `cancel()` 返回 True 时在指数边界尽早退出，返回 canceled=True（已抓到的照旧落盘）。
+    返回 {"fetched": {code: rows}, "skipped": [code], "latest": {code: date}, "canceled": bool}。
     """
     def _log(m: str) -> None:
         if log:
@@ -43,6 +44,10 @@ def run_index_fetch(root, codes, end_date: str, start_default: str = "2005-01-01
     root = Path(root)
     fetched, skipped, latest = {}, [], {}
     for code in codes:
+        if cancel and cancel():
+            _log("收到终止请求，指数抓取提前退出")
+            return {"fetched": fetched, "skipped": skipped, "latest": latest,
+                    "canceled": True}
         last = index_store.latest_date(root, code)
         start = _next_day(last) if last else start_default
         if start > end_date:
@@ -63,4 +68,4 @@ def run_index_fetch(root, codes, end_date: str, start_default: str = "2005-01-01
         fetched[code] = len(rows)
         latest[code] = index_store.latest_date(root, code)
         _log(f"指数 {code}: 写入 {len(rows)} 行，最新 {latest[code]}")
-    return {"fetched": fetched, "skipped": skipped, "latest": latest}
+    return {"fetched": fetched, "skipped": skipped, "latest": latest, "canceled": False}

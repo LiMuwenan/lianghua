@@ -24,7 +24,7 @@
           <td>{{ fmt(t.finished_at) }}</td>
           <td>
             <button class="btn ghost" @click="openLog(t)">日志</button>
-            <button v-if="t.status === 'running'" class="btn danger" @click="terminate(t)">终止</button>
+            <button v-if="['running', 'queued'].includes(t.status)" class="btn danger" @click="terminate(t)">终止</button>
           </td>
         </tr>
       </tbody>
@@ -57,9 +57,14 @@ async function openLog(t) {
 }
 async function terminate(t) {
   if (!confirm(`确认终止任务 #${t.id}？`)) return
-  await api.post(`/api/tasks/${t.id}/terminate`)
-  alert(`已请求终止任务 #${t.id}`)
-  load()
+  try {
+    await api.post(`/api/tasks/${t.id}/terminate`)
+    alert(`已请求终止任务 #${t.id}（若正在跑脚本，子进程会立即被结束）`)
+  } catch (e) {
+    alert(`终止失败：${e.message}`)
+  } finally {
+    load()
+  }
 }
 
 onMounted(load)

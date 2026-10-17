@@ -121,12 +121,24 @@ def _send(cfg, trade_date: str, html: str, log) -> dict:
         return {"sent": False, "reason": str(exc)}
 
 
-def run_daily_report(cfg, db, log=None, send: bool = True, today: str | None = None) -> dict:
-    """完整流程。返回 dict（含 status/trade_date/reason/metrics/html_path/email/output_files）。"""
+def run_daily_report(cfg, db, log=None, send: bool = True, today: str | None = None,
+                     cancel=None) -> dict:
+    """完整流程。返回 dict（含 status/trade_date/reason/metrics/html_path/email/output_files）。
+
+    `cancel()` 返回 True 时在阶段边界尽早退出，返回 status=aborted（支持手动终止）。
+    """
     def _log(m: str) -> None:
         if log:
             log(m)
         logger.info(m)
+
+    def _aborted(trade_date=None, output_files=None) -> dict:
+        return {"status": "aborted", "trade_date": trade_date, "reason": "已终止",
+                "output_files": output_files or []}
+
+    if cancel and cancel():
+        _log("收到终止请求，跳过报告生成")
+        return _aborted()
 
     trade_date = resolve_trade_date(today)
     if not trade_date:
@@ -137,8 +149,10 @@ def run_daily_report(cfg, db, log=None, send: bool = True, today: str | None = N
 
     try:
         r = index_ingest.run_index_fetch(cfg.index_dir, cfg.report_index_codes,
-                                         trade_date, log=_log)
+                                         trade_date, log=_log, cancel=cancel)
         _log(f"指数抓取：新增 {len(r['fetched'])}，跳过 {len(r['skipped'])}")
+        if r.get("canceled"):
+            return _aborted(trade_date)
     except Exception as exc:  # noqa: BLE001
         _log(f"指数抓取异常（不阻断）：{exc}")
 
@@ -149,6 +163,10 @@ def run_daily_report(cfg, db, log=None, send: bool = True, today: str | None = N
         return {"status": "skipped", "trade_date": trade_date, "reason": reason,
                 "stock_latest": ready["stock_latest"],
                 "index_ready": ready["index_ready"], "output_files": []}
+
+    if cancel and cancel():
+        _log("收到终止请求，跳过汇总与发送")
+        return _aborted(trade_date)
 
     gen = generate(cfg, db, trade_date)
     _log(f"已生成并归档：{gen['html_path']}")

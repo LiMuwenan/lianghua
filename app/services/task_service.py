@@ -141,12 +141,17 @@ class TaskService:
         return task
 
     # ---------- 任务终止支持 ----------
-    def _register(self, task_id: int, proc: "subprocess.Popen" = None) -> None:
-        """登记任务的取消事件与（可选）子进程句柄。"""
+    def _register(self, task_id: int, proc: "subprocess.Popen" = None) -> threading.Event:
+        """登记任务的取消事件与（可选）子进程句柄。取消事件已存在则复用（不覆盖，
+        避免运行期间被重新登记后丢失已置位的终止请求）。"""
         with self._reg_lock:
-            self._cancel_events[task_id] = threading.Event()
+            ev = self._cancel_events.get(task_id)
+            if ev is None:
+                ev = threading.Event()
+                self._cancel_events[task_id] = ev
             if proc is not None:
                 self._procs[task_id] = proc
+            return ev
 
     def _unregister(self, task_id: int) -> None:
         with self._reg_lock:
@@ -159,20 +164,73 @@ class TaskService:
             return self._cancel_events.get(task_id, threading.Event())
 
     def terminate(self, task_id: int) -> bool:
-        """请求终止运行中任务：置取消事件；若是子进程则立即 kill。返回是否命中运行中任务。"""
+        """请求终止任务：运行中 → 置取消事件并 kill 子进程；排队中/进程残留的行 → 落库标记已终止。
+
+        返回是否真的命中一个可终止的任务（未命中时调用方回 409）。
+        """
         with self._reg_lock:
             ev = self._cancel_events.get(task_id)
             proc = self._procs.get(task_id)
-        if ev is None and proc is None:
-            return False
+        hit = False
         if ev is not None:
             ev.set()
+            hit = True
         if proc is not None:
             try:
                 proc.kill()
             except Exception:  # noqa: BLE001
                 pass
-        return True
+            hit = True
+        if hit:
+            return True
+        # 未在本次进程运行中登记：可能是排队中，或上个进程被中断后残留的 running 行
+        return self._abort_pending_row(task_id)
+
+    def _abort_pending_row(self, task_id: int) -> bool:
+        """兜底终止：把 queued/running 状态的行直接落库标记为已终止。"""
+        db = SessionLocal()
+        try:
+            task = db.query(TaskRun).get(task_id)
+            if task is None or task.status not in ("queued", "running"):
+                return False
+            task.status = "aborted"
+            task.finished_at = datetime.now()
+            task.result_summary = {"canceled": True,
+                                  "reason": "未在本次进程运行中，已直接标记终止"}
+            db.commit()
+            logger.info("任务 %s 未在运行中，已兜底标记为已终止", task_id)
+            return True
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            logger.exception("兜底终止任务 %s 失败", task_id)
+            return False
+        finally:
+            db.close()
+
+    def reconcile_orphans(self) -> int:
+        """启动清理：上一个进程被中断后遗留的 queued/running 行本进程不会执行，
+        统一落库标记为已终止（诚实标注，避免列表长期停留在「运行中」）。返回清理条数。"""
+        db = SessionLocal()
+        try:
+            rows = (db.query(TaskRun)
+                    .filter(TaskRun.status.in_(("queued", "running")))
+                    .all())
+            if not rows:
+                return 0
+            now = datetime.now()
+            for task in rows:
+                task.status = "aborted"
+                task.finished_at = now
+                task.result_summary = {"canceled": True, "reason": "服务重启，前次运行中断"}
+            db.commit()
+            logger.info("启动清理：%d 个中断任务已标记为已终止", len(rows))
+            return len(rows)
+        except Exception:  # noqa: BLE001
+            db.rollback()
+            logger.exception("启动清理中断任务失败")
+            return 0
+        finally:
+            db.close()
 
     # ---------- 内部：工作线程 ----------
     def _loop(self):
@@ -191,6 +249,12 @@ class TaskService:
             task = db.query(TaskRun).get(task_id)
             if task is None:
                 return
+            # 排队期间已被终止（或其它终态）的任务不再执行，避免被覆盖回 running
+            if task.status != "queued":
+                logger.info("任务 %s 状态已为 %s，跳过执行", task_id, task.status)
+                return
+            # 先登记取消事件（早于 running 落库），保证任何时刻终止请求都能被接住
+            self._register(task_id)
             # 准备日志文件
             self.cfg.logs_dir.mkdir(parents=True, exist_ok=True)
             log_path = self.cfg.logs_dir / f"task_{task_id}.log"
@@ -217,7 +281,8 @@ class TaskService:
                     db.commit()
                     return
                 result = self._run_subprocess(
-                    strategy, log_path, params=task.params or {}, timeout=self.cfg.task_timeout_sec
+                    task_id, strategy, log_path, params=task.params or {},
+                    timeout=self.cfg.task_timeout_sec,
                 )
 
             task.finished_at = datetime.now()
@@ -238,6 +303,7 @@ class TaskService:
             except Exception:  # noqa
                 db.rollback()
         finally:
+            self._unregister(task_id)
             db.close()
 
     def _run_ingest(self, task, log_path: Path) -> dict:
@@ -316,9 +382,10 @@ class TaskService:
             self._unregister(task.id)
 
     def _run_report(self, task, log_path: Path) -> dict:
-        """每日大盘汇总：走 report_service，日志写任务日志文件。"""
+        """每日大盘汇总：走 report_service，日志写任务日志文件；支持协作式取消。"""
         from . import report_service
         self._register(task.id)
+        cancel_flag = self.cancel_event(task.id).is_set
         try:
             log_path.write_text("$ 每日大盘汇总\n", encoding="utf-8")
 
@@ -328,14 +395,18 @@ class TaskService:
 
             db = SessionLocal()
             try:
-                res = report_service.run_daily_report(self.cfg, db, log=_log, send=True)
+                res = report_service.run_daily_report(
+                    self.cfg, db, log=_log, send=True, cancel=cancel_flag)
             finally:
                 db.close()
             status = res.get("status", "failed")
+            summary = {k: v for k, v in res.items() if k != "metrics"}
+            if status == "aborted":
+                summary["canceled"] = True
             return {
                 "exit_code": 0 if status == "success" else None,
                 "status": status,
-                "summary": {k: v for k, v in res.items() if k != "metrics"},
+                "summary": summary,
                 "output_files": res.get("output_files") or [],
             }
         except Exception as exc:  # noqa: BLE001
@@ -378,7 +449,8 @@ class TaskService:
     def _refresh_freshness(self, data_dir: Path) -> None:
         refresh_freshness(data_dir)
 
-    def _run_subprocess(self, strategy, log_path: Path, params: dict, timeout: int) -> dict:
+    def _run_subprocess(self, task_id: int, strategy, log_path: Path, params: dict,
+                        timeout: int) -> dict:
         """构造并运行临时参数化副本，流式写日志。"""
         script_rel = strategy.script_path
         script_abs = self.cfg.absolute_script_path(script_rel)
@@ -407,14 +479,14 @@ class TaskService:
                 stderr=subprocess.STDOUT,
             )
             # 登记本次运行的任务号与其子进程，供 terminate() 取消
-            self._register(self.running_task_id, proc)
+            cancel_event = self._register(task_id, proc)
             stdout = proc.stdout
             lines = []
             with open(log_path, "a", encoding="utf-8", errors="replace") as f:
                 deadline = datetime.now().timestamp() + (timeout if timeout and timeout > 0 else 7200)
                 while True:
                     # 每次循环先判用户终止（优先级最高，避免被 kill 后的 poll 状态早退）
-                    if self._cancel_events.get(self.running_task_id, threading.Event()).is_set():
+                    if cancel_event.is_set():
                         if proc.poll() is None:
                             proc.kill()
                             proc.wait()
@@ -467,7 +539,7 @@ class TaskService:
                 "summary": {"lines": len(lines), "exit_code": code},
             }
         finally:
-            self._unregister(self.running_task_id)
+            self._unregister(task_id)
             if tmp_path and tmp_path.exists():
                 tmp_path.unlink(missing_ok=True)
 

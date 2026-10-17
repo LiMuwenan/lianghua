@@ -80,8 +80,9 @@ def on_startup():
     app.state.ds = _ds                       # 供个股初始化等服务使用
     ingest.bind_source(_ds)
     index_ingest.bind_source(_ds)
-    # 启动任务执行线程
+    # 启动任务执行线程（先清理上个进程遗留的 queued/running 行，再开线程）
     service = init_task_service(cfg)
+    service.reconcile_orphans()
     service.start()
     # 启动时用独立会话扫描登记脚本
     from .database import SessionLocal
