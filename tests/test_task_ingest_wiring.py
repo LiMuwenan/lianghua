@@ -123,3 +123,40 @@ def test_run_report_logs_in_at_task_start(tmp_path, monkeypatch):
                           tmp_path / "task.log")
     assert res["status"] == "success"
     assert ds.calls == 1
+
+
+def test_run_ingest_writes_failure_reason_to_task_log(tmp_path, monkeypatch):
+    """任务中抛错（如断网重登失败）必须在任务日志里留下原因，便于排查。"""
+    def boom(*a, **k):
+        raise RuntimeError("模拟断网")
+
+    monkeypatch.setattr(ts.ingest, "run_fetch", boom)
+    monkeypatch.setattr(ts.ingest, "_trade_dates", lambda s, e: ["2024-01-02"])
+    monkeypatch.setattr(ts, "SessionLocal", lambda: _FakeDB())
+
+    log_path = tmp_path / "task.log"
+    svc = ts.TaskService(_cfg(tmp_path), ds=_FakeDS())
+    res = svc._run_ingest(SimpleNamespace(id=4, ref_id=1, params={}), log_path)
+
+    assert res["status"] == "failed"
+    text = log_path.read_text(encoding="utf-8")
+    assert "任务失败" in text and "模拟断网" in text
+
+
+def test_run_report_writes_failure_reason_to_task_log(tmp_path, monkeypatch):
+    """报告任务异常同样要落到任务日志。"""
+    from app.services import report_service
+
+    def boom(*a, **k):
+        raise RuntimeError("模拟断网")
+
+    monkeypatch.setattr(report_service, "run_daily_report", boom)
+    monkeypatch.setattr(ts, "SessionLocal", lambda: _FakeDB())
+
+    log_path = tmp_path / "task.log"
+    svc = ts.TaskService(_cfg(tmp_path), ds=_FakeDS())
+    res = svc._run_report(SimpleNamespace(id=5, ref_id=0, params={}), log_path)
+
+    assert res["status"] == "failed"
+    text = log_path.read_text(encoding="utf-8")
+    assert "任务失败" in text and "模拟断网" in text

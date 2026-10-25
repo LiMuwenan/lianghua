@@ -52,8 +52,12 @@ def _num(v) -> float:
         return float("nan")
 
 
-def _row_to_stock_df(rows: List[dict]) -> pd.DataFrame:
-    """把当日全市场 dict 行转成 24 列宽表（含因子与复权价）。"""
+def _row_to_stock_df(rows: List[dict],
+                     log: Callable[[str], None] | None = None) -> pd.DataFrame:
+    """把当日全市场 dict 行转成 24 列宽表（含因子与复权价）。
+
+    `log` 提供时，空价格告警会写入任务日志（否则仅留控制台）。
+    """
     records = []
     blank = 0
     for r in rows:
@@ -67,7 +71,11 @@ def _row_to_stock_df(rows: List[dict]) -> pd.DataFrame:
         adjust = compute_adjusted_prices(r2)
         records.append({**r2, **adjust})
     if blank:
-        logger.warning("日K 有 %d 行价格为空/非数值，已按 NaN 落表（不复权价同为空）", blank)
+        msg = f"日K 有 {blank} 行价格为空/非数值，已按 NaN 落表（不复权价同为空）"
+        if log:
+            log(msg)
+        else:
+            logger.warning("%s", msg)
     if not records:
         return pd.DataFrame(columns=store.ALL_COLS)
     df = pd.DataFrame(records)
@@ -147,7 +155,7 @@ def run_fetch(root, dates: List[str],
                                      "hfq_factor": factors[code]["hfq_factor"]}
             fac = last_factor.get(code) or {"qfq_factor": 1.0, "hfq_factor": 1.0}
             b["qfq_factor"], b["hfq_factor"] = fac["qfq_factor"], fac["hfq_factor"]
-        df = _row_to_stock_df(bars)
+        df = _row_to_stock_df(bars, log=_log)
         # 原始层留存（审计/可重建）：写失败不阻断主链路
         if daily_dir:
             try:

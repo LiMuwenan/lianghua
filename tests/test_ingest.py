@@ -279,3 +279,18 @@ def test_run_fetch_continues_when_one_bar_has_blank_prices(tmp_path, monkeypatch
     bad_back = store.read_stock(tmp_path, "000002")
     assert bad_back["qfq_open"].isna().all()
     assert store.read_stock(tmp_path, "000001")["open"].iloc[0] == 1
+
+
+def test_run_fetch_logs_blank_rows_to_task_log(tmp_path, monkeypatch):
+    """空价格行数要经 log 回调写进任务日志，而不是只在控制台可见。"""
+    def bars(date):
+        return [{**fake_daily_bars(date)[0],
+                 "open": "", "high": "", "low": "", "close": ""}]
+
+    monkeypatch.setattr(ingest, "_fetch_daily_bars", bars)
+    monkeypatch.setattr(ingest, "_fetch_factors", lambda date: [])
+    logs = []
+    res = ingest.run_fetch(tmp_path, dates=["2024-01-02"], cancel_flag=lambda: False,
+                           freshness={}, log=logs.append)
+    assert res["status"] == "success"
+    assert any("价格为空" in s for s in logs)

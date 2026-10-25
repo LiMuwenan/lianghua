@@ -308,6 +308,15 @@ class TaskService:
             self._unregister(task_id)
             db.close()
 
+    @staticmethod
+    def _append_log_line(log_path: Path, line: str) -> None:
+        """向任务日志追加一行；写盘失败不掩盖原始异常。"""
+        try:
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(line + "\n")
+        except OSError:
+            logger.exception("写任务日志失败: %s", log_path)
+
     def _login_source(self, log_path: Path) -> None:
         """任务开始时登录数据源（系统启动不登录）。
 
@@ -319,8 +328,7 @@ class TaskService:
         try:
             self.ds.connect()
         except Exception as exc:  # noqa: BLE001
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(f"$ baostock 登录失败：{exc}\n")
+            self._append_log_line(log_path, f"$ baostock 登录失败：{exc}")
             raise
 
     def _run_ingest(self, task, log_path: Path) -> dict:
@@ -392,6 +400,7 @@ class TaskService:
             }
         except Exception as exc:  # noqa: BLE001
             logger.exception("内建摄取任务 %s 异常", task.id)
+            self._append_log_line(log_path, f"$ 任务失败：{exc}")
             return {
                 "exit_code": None,
                 "status": "failed",
@@ -432,6 +441,7 @@ class TaskService:
             }
         except Exception as exc:  # noqa: BLE001
             logger.exception("报告任务 %s 异常", task.id)
+            self._append_log_line(log_path, f"$ 任务失败：{exc}")
             return {"exit_code": None, "status": "failed",
                     "summary": {"error": str(exc)}, "output_files": []}
         finally:

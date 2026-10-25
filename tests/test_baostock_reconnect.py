@@ -92,3 +92,62 @@ def test_connect_raises_when_login_fails(monkeypatch):
         assert False, "登录失败应抛出 DataSourceError"
     except DataSourceError as exc:
         assert "登录失败" in str(exc)
+
+
+def test_daily_bars_reconnects_on_network_error(monkeypatch):
+    """会话被服务端断开时查询返回 10002007(网络接收错误)，也应重登并重试成功。"""
+    import baostock as real_bs
+    calls = {"n": 0, "logins": 0}
+
+    def fake_query(*a, **k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return _RS(code="10002007", msg="网络接收错误。")
+        return _RS(rows=[("sh.600000", "2024-01-02", "10.0")],
+                   fields=("code", "date", "open"))
+
+    def fake_login():
+        calls["logins"] += 1
+        return _RS()
+
+    monkeypatch.setattr(real_bs, "query_daily_history_k_AStock", fake_query)
+    monkeypatch.setattr(real_bs, "login", fake_login)
+
+    from app.datasources.baostock import BaostockDataSource
+    out = BaostockDataSource().daily_bars("2024-01-02")
+    assert out == [{"code": "sh.600000", "date": "2024-01-02", "open": "10.0"}]
+    assert calls == {"n": 2, "logins": 1}
+
+
+def test_daily_bars_raises_when_network_error_persists(monkeypatch):
+    """重登后仍是网络错误：抛 DataSourceError，禁止静默返回 0 条。"""
+    import baostock as real_bs
+    from app.datasources.base import DataSourceError
+
+    monkeypatch.setattr(real_bs, "query_daily_history_k_AStock",
+                        lambda *a, **k: _RS(code="10002007", msg="网络接收错误。"))
+    monkeypatch.setattr(real_bs, "login", lambda: _RS())
+
+    from app.datasources.baostock import BaostockDataSource
+    try:
+        BaostockDataSource().daily_bars("2024-01-02")
+        assert False, "重登后仍失败应抛出 DataSourceError"
+    except DataSourceError as exc:
+        assert "10002007" in str(exc)
+
+
+def test_trade_dates_raises_on_network_error_when_relogin_fails(monkeypatch):
+    """任务起始的交易日查询遇网络断连且重登失败：抛错让任务失败，而非 0 天“成功”。"""
+    import baostock as real_bs
+    from app.datasources.base import DataSourceError
+
+    monkeypatch.setattr(real_bs, "query_trade_dates",
+                        lambda *a, **k: _RS(code="10002007", msg="网络接收错误。"))
+    monkeypatch.setattr(real_bs, "login", lambda: _RS(code="500", msg="连接服务器失败"))
+
+    from app.datasources.baostock import BaostockDataSource
+    try:
+        BaostockDataSource().trade_dates("2024-01-02", "2024-01-05")
+        assert False, "网络错误且重登失败应抛出 DataSourceError"
+    except DataSourceError as exc:
+        assert "登录失败" in str(exc)
