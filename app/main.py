@@ -76,12 +76,13 @@ def on_startup():
     # 建表 + 初始化目录
     init_db()
     cfg.logs_dir.mkdir(parents=True, exist_ok=True)
-    # 不在此发起 baostock 登录（会话会过期）；改为首次查询时由 _query() 惰性登录
+    # 不在此发起 baostock 登录（会话会过期）；任务开始时由 TaskService 登录，
+    # 任务中会话失效则由 BaostockDataSource._query() 自动重登
     app.state.ds = _ds                       # 供个股初始化等服务使用
     ingest.bind_source(_ds)
     index_ingest.bind_source(_ds)
     # 启动任务执行线程（先清理上个进程遗留的 queued/running 行，再开线程）
-    service = init_task_service(cfg)
+    service = init_task_service(cfg, _ds)
     service.reconcile_orphans()
     service.start()
     # 启动时用独立会话扫描登记脚本

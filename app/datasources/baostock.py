@@ -25,7 +25,17 @@ class BaostockDataSource(BaseStockDataSource):
     name = "baostock"
 
     def connect(self) -> None:
-        rs = bs.login()
+        """建立 baostock 会话。
+
+        只在「任务开始时」与「任务中会话失效时」调用，系统启动不登录。
+        baostock 每次 login 都会新建 socket，不复用旧会话；这里不主动 logout，
+        避免在旧会话已被服务端回收时卡死在无超时的 recv 上。
+        """
+        try:
+            rs = bs.login()
+        except Exception as exc:  # noqa: BLE001
+            # baostock 内部建连失败时可能直接抛异常（如 socket 未创建）
+            raise DataSourceError(f"baostock 登录失败: {exc}") from exc
         if rs.error_code != "0":
             raise DataSourceError(f"baostock 登录失败: {rs.error_msg}")
 
@@ -35,21 +45,27 @@ class BaostockDataSource(BaseStockDataSource):
         except Exception:  # noqa: BLE001
             pass
 
+    @staticmethod
+    def _is_unauthenticated(rs) -> bool:
+        """判断查询结果是否为登录态失效。"""
+        code = str(getattr(rs, "error_code", "0"))
+        msg = str(getattr(rs, "error_msg", "") or "")
+        return code == "10001001" or "未登录" in msg or "login" in msg.lower()
+
     def _query(self, fn):
-        """执行查询；遇到登录态失效(10001001/未登录)自动重登一次再试。
+        """执行查询；遇到登录态失效(10001001/未登录/you don't login.)自动重登一次再试。
 
         baostock 会话有效期短，服务长跑后易失效；此处自愈，避免整次摄取因 0 条流水而空跑。
+        重登失败直接抛 DataSourceError：宁可任务失败并留痕，也不静默跑出 0 条。
         """
         rs = fn()
-        code = getattr(rs, "error_code", "0")
-        msg = getattr(rs, "error_msg", "") or ""
-        if code == "10001001" or "未登录" in msg:
-            logger.warning("baostock 登录态失效(%s)，重新登录后重试", msg or code)
-            r = bs.login()
-            if r.error_code != "0":
-                logger.warning("baostock 重新登录失败: %s", r.error_msg)
-                return rs
+        if self._is_unauthenticated(rs):
+            logger.warning("baostock 登录态失效(%s)，重新登录后重试",
+                           getattr(rs, "error_msg", "") or getattr(rs, "error_code", ""))
+            self.connect()          # 登录失败会抛 DataSourceError
             rs = fn()
+            if self._is_unauthenticated(rs):
+                raise DataSourceError(f"baostock 重新登录后查询仍无效: {rs.error_msg}")
             if getattr(rs, "error_code", "0") != "0":
                 logger.warning("重登后查询仍失败(%s): %s", rs.error_code, rs.error_msg)
         return rs

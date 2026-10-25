@@ -59,3 +59,36 @@ def test_trade_dates_returns_empty_on_fatal_error(monkeypatch):
     from app.datasources.baostock import BaostockDataSource
     ds = BaostockDataSource()
     assert ds.trade_dates("2026-09-23", "2026-09-24") == []
+
+
+def test_trade_dates_raises_when_relogin_fails(monkeypatch):
+    """会话失效且重登失败：抛 DataSourceError，禁止返回 0 条让任务空跑成“成功”。"""
+    import baostock as real_bs
+    from app.datasources.base import DataSourceError
+
+    monkeypatch.setattr(real_bs, "query_trade_dates",
+                        lambda *a, **k: _RS(code="10001001", msg="you don't login."))
+    monkeypatch.setattr(real_bs, "login", lambda: _RS(code="500", msg="连接服务器失败"))
+
+    from app.datasources.baostock import BaostockDataSource
+    ds = BaostockDataSource()
+    try:
+        ds.trade_dates("2026-09-23", "2026-09-24")
+        assert False, "重登失败应抛出 DataSourceError"
+    except DataSourceError as exc:
+        assert "登录失败" in str(exc)
+
+
+def test_connect_raises_when_login_fails(monkeypatch):
+    """任务开始时登录失败要抛 DataSourceError（任务落 failed 并留痕）。"""
+    import baostock as real_bs
+    from app.datasources.base import DataSourceError
+    monkeypatch.setattr(real_bs, "login", lambda: _RS(code="500", msg="连接服务器失败"))
+
+    from app.datasources.baostock import BaostockDataSource
+    ds = BaostockDataSource()
+    try:
+        ds.connect()
+        assert False, "登录失败应抛出 DataSourceError"
+    except DataSourceError as exc:
+        assert "登录失败" in str(exc)
