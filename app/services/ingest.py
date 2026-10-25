@@ -39,20 +39,35 @@ def compute_adjusted_prices(row: dict) -> dict:
     }
 
 
+def _num(v) -> float:
+    """baostock 数值字段转 float；空串/None/非法值一律转 NaN。
+
+    不能静默保留原始字符串：字符串乘复权因子会抛
+    TypeError(can't multiply sequence by non-int of type 'float')，
+    单只股票的脏数据就会中断整次多日摄取。
+    """
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return float("nan")
+
+
 def _row_to_stock_df(rows: List[dict]) -> pd.DataFrame:
     """把当日全市场 dict 行转成 24 列宽表（含因子与复权价）。"""
     records = []
+    blank = 0
     for r in rows:
         r2 = dict(r)
-        # baostock 返回数字为字符串，先对参与复权计算的字段转数值
+        # baostock 返回数字为字符串，先对参与复权计算的字段转数值（失败转 NaN）
         for k in ("open", "high", "low", "close", "qfq_factor", "hfq_factor"):
-            if k in r2 and r2[k] is not None:
-                try:
-                    r2[k] = float(r2[k])
-                except (TypeError, ValueError):
-                    pass
+            if k in r2:
+                r2[k] = _num(r2[k])
+        if any(pd.isna(r2.get(k)) for k in ("open", "high", "low", "close")):
+            blank += 1
         adjust = compute_adjusted_prices(r2)
         records.append({**r2, **adjust})
+    if blank:
+        logger.warning("日K 有 %d 行价格为空/非数值，已按 NaN 落表（不复权价同为空）", blank)
     if not records:
         return pd.DataFrame(columns=store.ALL_COLS)
     df = pd.DataFrame(records)

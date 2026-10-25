@@ -249,3 +249,33 @@ def test_run_fetch_without_raw_dirs_keeps_behavior(tmp_path, monkeypatch):
     res = ingest.run_fetch(market, dates=["2024-01-02"], cancel_flag=lambda: False,
                            freshness={"000001": "2024-01-02"})
     assert res["skipped_dates"] == 1
+
+
+def test_row_to_stock_df_tolerates_blank_prices():
+    """baostock 偶发返回空串价格：按 NaN 落表，不因字符串乘法中断整批摄取。"""
+    row = {**fake_daily_bars("2024-01-02")[0],
+           "open": "", "high": "", "low": "", "close": "",
+           "qfq_factor": 1.0, "hfq_factor": 1.0}
+    out = ingest._row_to_stock_df([row])
+    assert len(out) == 1
+    assert out["open"].isna().all()
+    assert out["qfq_open"].isna().all() and out["hfq_open"].isna().all()
+    assert out["qfq_factor"].iloc[0] == 1.0   # 因子仍为数值
+
+
+def test_run_fetch_continues_when_one_bar_has_blank_prices(tmp_path, monkeypatch):
+    """单只股票当日价格为空不应导致整次（多日）获取任务异常退出。"""
+    def bars(date):
+        good = fake_daily_bars(date)[0]
+        bad = {**good, "code": "000002",
+               "open": "", "high": "", "low": "", "close": ""}
+        return [good, bad]
+
+    monkeypatch.setattr(ingest, "_fetch_daily_bars", bars)
+    monkeypatch.setattr(ingest, "_fetch_factors", lambda date: [])
+    res = ingest.run_fetch(tmp_path, dates=["2024-01-02"], cancel_flag=lambda: False,
+                           freshness={})
+    assert res["status"] == "success" and res["rows"] == 2
+    bad_back = store.read_stock(tmp_path, "000002")
+    assert bad_back["qfq_open"].isna().all()
+    assert store.read_stock(tmp_path, "000001")["open"].iloc[0] == 1
