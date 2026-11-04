@@ -13,6 +13,7 @@ import queue
 import subprocess
 import sys
 import threading
+import traceback
 from datetime import date, datetime
 from pathlib import Path
 
@@ -401,6 +402,8 @@ class TaskService:
         except Exception as exc:  # noqa: BLE001
             logger.exception("内建摄取任务 %s 异常", task.id)
             self._append_log_line(log_path, f"$ 任务失败：{exc}")
+            # 同时把完整异常堆栈写入任务日志，前端日志弹窗可直接定位出错代码行
+            self._append_log_line(log_path, traceback.format_exc().rstrip())
             return {
                 "exit_code": None,
                 "status": "failed",

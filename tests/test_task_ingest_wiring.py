@@ -143,6 +143,25 @@ def test_run_ingest_writes_failure_reason_to_task_log(tmp_path, monkeypatch):
     assert "任务失败" in text and "模拟断网" in text
 
 
+def test_run_ingest_writes_traceback_to_task_log(tmp_path, monkeypatch):
+    """任务失败时除原因外还要把完整异常堆栈写进任务日志，便于页面直接排查。"""
+    def boom(*a, **k):
+        raise RuntimeError("模拟断网")
+
+    monkeypatch.setattr(ts.ingest, "run_fetch", boom)
+    monkeypatch.setattr(ts.ingest, "_trade_dates", lambda s, e: ["2024-01-02"])
+    monkeypatch.setattr(ts, "SessionLocal", lambda: _FakeDB())
+
+    log_path = tmp_path / "task.log"
+    svc = ts.TaskService(_cfg(tmp_path), ds=_FakeDS())
+    res = svc._run_ingest(SimpleNamespace(id=6, ref_id=1, params={}), log_path)
+
+    assert res["status"] == "failed"
+    text = log_path.read_text(encoding="utf-8")
+    assert "Traceback (most recent call last)" in text
+    assert "RuntimeError: 模拟断网" in text
+
+
 def test_run_report_writes_failure_reason_to_task_log(tmp_path, monkeypatch):
     """报告任务异常同样要落到任务日志。"""
     from app.services import report_service
