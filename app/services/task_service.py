@@ -9,6 +9,7 @@
 - 单任务超时后 kill 子进程（subprocess 超时 + kill）。
 """
 import logging
+import os
 import queue
 import subprocess
 import sys
@@ -506,11 +507,20 @@ class TaskService:
             header += "\n"
             log_path.write_text(header, encoding="utf-8")
 
+            # 临时副本在系统临时目录（容器内为 /tmp），脚本按 __file__ 推导的仓库根
+            # 会偏离真实仓库根（容器内 /app 会被误当命名空间包），导致 app.* 导入失败；
+            # 显式注入 PYTHONPATH=仓库根，保证子进程能 import 平台模块。
+            env = os.environ.copy()
+            root = str(self.cfg.ROOT)
+            env["PYTHONPATH"] = (root + os.pathsep + env["PYTHONPATH"]
+                                 if env.get("PYTHONPATH") else root)
+
             proc = subprocess.Popen(
                 cmd,
                 cwd=workdir,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                env=env,
             )
             # 登记本次运行的任务号与其子进程，供 terminate() 取消
             cancel_event = self._register(task_id, proc)
