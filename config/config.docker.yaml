@@ -7,6 +7,9 @@ output_dir: /data/outputs
 # 主数据（Parquet 按股票分文件）容器内目录
 data_dir: /data/market
 
+# 指数日线 Parquet 目录（须落在挂载卷内，否则容器重建丢数据）
+index_dir: /data/market/index_daily
+
 # 原始层目录（容器内）
 daily_dir: /data/raw/daily
 factor_dir: /data/raw/factor
